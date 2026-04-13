@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Uai Pescados - MVP</title>
+  <style>
+    :root{
+      --bg:#f5f7fb; --card:#ffffff; --text:#1f2937; --muted:#6b7280; --line:#e5e7eb;
+      --primary:#0f766e; --primary-2:#115e59; --danger:#b91c1c; --warn:#b45309;
+    }
+    *{box-sizing:border-box} body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--text)}
+    .app{display:grid;grid-template-columns:260px 1fr;min-height:100vh}
+    aside{background:#0f172a;color:#fff;padding:18px;display:flex;flex-direction:column;gap:14px}
+    .menu-toggle{display:none;padding:10px 14px;border-radius:10px;border:0;background:#0f172a;color:#fff;font-weight:600;cursor:pointer}
+    .brand{font-size:22px;font-weight:700;line-height:1.2}
+    .sub{font-size:12px;color:#cbd5e1}
+    nav button{width:100%;padding:12px 14px;margin-bottom:8px;border:0;border-radius:10px;background:#1e293b;color:#fff;text-align:left;cursor:pointer}
+    nav button.active, nav button:hover{background:var(--primary)}
+    main{padding:18px}
+    .topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:18px}
+    .title{font-size:24px;font-weight:700}
+    .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+    .span-3{grid-column:span 3}.span-4{grid-column:span 4}.span-6{grid-column:span 6}.span-8{grid-column:span 8}.span-12{grid-column:span 12}
+    .kpi{font-size:28px;font-weight:700;margin-top:8px}.muted{color:var(--muted);font-size:13px}
+    table{width:100%;border-collapse:collapse}.table-wrap{overflow:auto}
+    th,td{padding:10px;border-bottom:1px solid var(--line);font-size:14px;text-align:left;vertical-align:top}
+    th{background:#f8fafc;position:sticky;top:0}
+    input,select,textarea{width:100%;padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;font-size:14px;background:#fff}
+    textarea{min-height:80px;resize:vertical}
+    .row{display:grid;grid-template-columns:repeat(12,1fr);gap:12px;margin-bottom:12px}
+    .col-2{grid-column:span 2}.col-3{grid-column:span 3}.col-4{grid-column:span 4}.col-6{grid-column:span 6}.col-12{grid-column:span 12}
+    .actions{display:flex;gap:8px;flex-wrap:wrap}
+    .btn{padding:10px 14px;border-radius:10px;border:0;cursor:pointer;font-weight:600}
+    .btn-primary{background:var(--primary);color:#fff}.btn-primary:hover{background:var(--primary-2)}
+    .btn-secondary{background:#e2e8f0}.btn-danger{background:var(--danger);color:#fff}.btn-warn{background:var(--warn);color:#fff}
+    .pill{display:inline-block;padding:4px 8px;border-radius:999px;font-size:12px;background:#e2e8f0}
+    .success{background:#dcfce7;color:#166534}.warning{background:#fef3c7;color:#92400e}.danger{background:#fee2e2;color:#991b1b}.info{background:#dbeafe;color:#1d4ed8}
+    .hidden{display:none}.right{text-align:right}
+    .small{font-size:12px}.hr{height:1px;background:var(--line);margin:14px 0}
+    .mobile-backdrop{display:none}
+    @media (max-width: 960px){
+      .app{grid-template-columns:1fr}
+      aside{position:fixed;top:0;left:0;bottom:0;width:min(82vw,320px);transform:translateX(-100%);transition:transform .2s ease;z-index:30;overflow:auto}
+      body.menu-open aside{transform:translateX(0)}
+      .menu-toggle{display:inline-block}
+      .topbar{align-items:flex-start;flex-direction:column}
+      .topbar-head{width:100%;display:flex;justify-content:space-between;align-items:center;gap:12px}
+      .mobile-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:20}
+      body.menu-open .mobile-backdrop{display:block}
+      main{padding:14px}
+      .span-3,.span-4,.span-6,.span-8,.span-12,.col-2,.col-3,.col-4,.col-6,.col-12{grid-column:span 12}
+    }
+  </style>
+</head>
+<body>
+<div class="mobile-backdrop" id="mobileBackdrop"></div>
+<div class="app">
+  <aside id="sidebar">
+    <div>
+      <div class="brand">Uai Pescados</div>
+      <div class="sub">MVP simples e rápido</div>
+    </div>
+    <nav id="menu"></nav>
+    <div class="sub">Contas: Caixa, Uai Sicoob, Uai Itaú, HM Itaú</div>
+  </aside>
+  <main>
+    <div class="topbar">
+      <div class="topbar-head">
+        <button class="menu-toggle" id="menuToggle">☰ Menu</button>
+        <div class="title" id="pageTitle">Dashboard</div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-secondary" id="seedBtn">Carregar exemplo</button>
+        <button class="btn btn-danger" id="resetBtn">Limpar dados</button>
+      </div>
+    </div>
+    <div id="view"></div>
+  </main>
+</div>
+<script>
+const STORAGE_KEY = 'uai_pescados_mvp_v1';
+const defaultData = {
+  customers: [], suppliers: [], employees: [], institutions: [],
+  accounts: [
+    {id:1,name:'Caixa',type:'caixa',openingBalance:0},
+    {id:2,name:'Uai Sicoob',type:'conta_corrente',openingBalance:0},
+    {id:3,name:'Uai Itaú',type:'conta_corrente',openingBalance:0},
+    {id:4,name:'HM Itaú',type:'conta_corrente',openingBalance:0},
+  ],
+  products: [
+    {id:1,name:'Filé de Tilápia Individual c/ Tirinha',type:'producao_propria',unit:'kg',stock:0,cost:0},
+    {id:2,name:'Filé de Tilápia Individual s/ Tirinha',type:'producao_propria',unit:'kg',stock:0,cost:0},
+    {id:3,name:'Filé de Tilápia 500g c/ Tirinha',type:'producao_propria',unit:'kg',stock:0,cost:0},
+    {id:4,name:'Filé de Tilápia 500g s/ Tirinha',type:'producao_propria',unit:'kg',stock:0,cost:0},
+    {id:5,name:'Posta de Tilápia',type:'producao_propria',unit:'kg',stock:0,cost:0},
+    {id:6,name:'Tilápia Inteira Limpa Escamada e Eviscerada',type:'producao_propria',unit:'kg',stock:0,cost:0},
+  ],
+  sales: [], cheques: [], borders: [], finance: [], transfers: []
+};
+let state = load();
+let currentPage = 'dashboard';
+const pages = [
+  ['dashboard','Dashboard'],['customers','Clientes'],['suppliers','Fornecedores'],['employees','Funcionários'],
+  ['institutions','Instituições'],['products','Produtos'],['sales','Vendas'],['cheques','Cheques'],['borders','Antecipações'],['finance','Financeiro']
+];
+const API_BASE = 'https://uai-pescados-backend.onrender.com';
+async function apiGet(path){ const r = await fetch(API_BASE + path); if(!r.ok) throw new Error('Erro ao carregar ' + path); return await r.json(); }
+async function apiPost(path, body){ const r = await fetch(API_BASE + path, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }); const j = await r.json(); if(!r.ok) throw new Error(j.error || ('Erro ao salvar ' + path)); return j; }
+function nextCode(prefix,list){ let max=0; list.forEach(x=>{ const m=String(x.code||'').match(/(\d+)$/); if(m) max=Math.max(max, Number(m[1])); }); return prefix + String(max+1).padStart(4,'0'); }
+async function syncRemoteCadastros(){
+  try{
+    const [customers, suppliers, products] = await Promise.all([apiGet('/clientes'), apiGet('/fornecedores'), apiGet('/produtos')]);
+    state.customers = customers.map(x=>({ id:x.id, code:x.codigo||'', name:x.nome||'', phone:x.telefone||'', city:x.cidade||'', creditLimit:Number(x.limite_credito||0)||0 }));
+    state.suppliers = suppliers.map(x=>({ id:x.id, code:x.codigo||'', name:x.nome||'', type:x.tipo||'', phone:x.telefone||'', city:x.cidade||'' }));
+    const localProductMap = Object.fromEntries((state.products||[]).map(p=>[p.code||('ID'+p.id), p]));
+    state.products = products.map(x=>{ const local = localProductMap[x.codigo||('ID'+x.id)] || {}; return { id:x.id, code:x.codigo||'', name:x.nome||'', type:x.tipo||'revenda', unit:x.unidade||'kg', stock:Number(local.stock||0), cost:Number(local.cost||0), salePrice:Number(local.salePrice||0) }; });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    render();
+  }catch(err){ console.error(err); }
+}
+function isMobile(){ return window.innerWidth <= 960; }
+function closeMobileMenu(){ document.body.classList.remove('menu-open'); }
+function toggleMobileMenu(){ document.body.classList.toggle('menu-open'); }
+function load(){ try{return {...defaultData,...JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}')}}catch{return structuredClone(defaultData)} }
+function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); render(); }
+function nextId(list){ return list.length ? Math.max(...list.map(x=>x.id||0))+1 : 1; }
+function money(v){ return Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
+function fmtDate(d){ if(!d) return ''; const dt=new Date(d+'T00:00:00'); return dt.toLocaleDateString('pt-BR'); }
+function esc(s){ return String(s??'').replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m])); }
+function accountBalance(accountId){
+  const acc = state.accounts.find(a=>a.id===accountId); let total=Number(acc?.openingBalance||0);
+  state.finance.forEach(f=>{ if(f.accountId===accountId) total += f.type==='entrada'?Number(f.value): -Number(f.value); });
+  state.transfers.forEach(t=>{ if(t.toAccountId===accountId) total += Number(t.value); if(t.fromAccountId===accountId) total -= Number(t.value); });
+  return total;
+}
+function totalOpenReceivables(){
+  return state.sales.reduce((sum,s)=> sum + Math.max(0, Number(s.total||0)-Number(s.receivedImmediate||0)-Number(s.receivedByBorders||0)-Number(s.returnedCheques||0)),0)
+      + state.cheques.filter(c=>c.status==='devolvido').reduce((sum,c)=>sum+Number(c.value||0),0);
+}
+function renderMenu(){
+  const nav=document.getElementById('menu');
+  nav.innerHTML=pages.map(([key,label])=>`<button class="${currentPage===key?'active':''}" onclick="go('${key}')">${label}</button>`).join('');
+}
+function go(page){ currentPage=page; if(isMobile()) closeMobileMenu(); render(); }
+function render(){ renderMenu(); document.getElementById('pageTitle').textContent = pages.find(p=>p[0]===currentPage)?.[1]||'Uai Pescados';
+  const view=document.getElementById('view');
+  const renders={dashboard:renderDashboard,customers:renderCustomers,suppliers:renderSuppliers,employees:renderEmployees,institutions:renderInstitutions,products:renderProducts,sales:renderSales,cheques:renderCheques,borders:renderBorders,finance:renderFinance};
+  view.innerHTML=(renders[currentPage]||renderDashboard)(); bindForms(); }
+function cardKpi(title,val,extra=''){ return `<div class="card span-3"><div class="muted">${title}</div><div class="kpi">${val}</div><div class="small muted">${extra}</div></div>`; }
+function renderDashboard(){
+  const totalSales = state.sales.reduce((s,x)=>s+Number(x.total||0),0);
+  const chequesCarteira = state.cheques.filter(c=>c.status==='em_carteira').reduce((s,c)=>s+Number(c.value||0),0);
+  const chequesAntecip = state.cheques.filter(c=>c.status==='antecipado').reduce((s,c)=>s+Number(c.value||0),0);
+  const cards = state.accounts.map(a=> cardKpi(a.name,money(accountBalance(a.id)),'Saldo atual')).join('');
+  return `<div class="grid">${cards}
+    ${cardKpi('Vendas',money(totalSales),'Total lançado')}
+    ${cardKpi('Cheques em carteira',money(chequesCarteira),'Aguardando ação')}
+    ${cardKpi('Cheques antecipados',money(chequesAntecip),'Já negociados')}
+    ${cardKpi('Receber em aberto',money(totalOpenReceivables()),'Títulos pendentes')}
+    <div class="card span-12"><h3>Resumo rápido</h3><div class="table-wrap"><table><thead><tr><th>Conta</th><th class="right">Saldo</th></tr></thead><tbody>${state.accounts.map(a=>`<tr><td>${a.name}</td><td class="right">${money(accountBalance(a.id))}</td></tr>`).join('')}</tbody></table></div></div>
+  </div>`;
+}
+function simpleListPage(title,list,cols,formHtml){
+  return `<div class="grid"><div class="card span-12"><h3>${title}</h3>${formHtml}</div><div class="card span-12"><div class="table-wrap"><table><thead><tr>${cols.map(c=>`<th>${c.label}</th>`).join('')}</tr></thead><tbody>${list.length?list.map(item=>`<tr>${cols.map(c=>`<td>${c.render(item)}</td>`).join('')}</tr>`).join(''):`<tr><td colspan="${cols.length}" class="muted">Sem registros.</td></tr>`}</tbody></table></div></div></div>`;
+}
+function renderCustomers(){ return simpleListPage('Clientes', state.customers, [
+  {label:'Código',render:x=>esc(x.code||'')}, {label:'Nome',render:x=>esc(x.name)}, {label:'Telefone',render:x=>esc(x.phone)}, {label:'Cidade',render:x=>esc(x.city)},
+  {label:'Limite',render:x=>x.creditLimit?money(x.creditLimit):'<span class=\"pill warning\">Sem limite ajustado</span>'}
+], `<form id="customerForm"><div class="row"><div class="col-4"><input name="name" placeholder="Nome" required></div><div class="col-3"><input name="phone" placeholder="Telefone"></div><div class="col-3"><input name="city" placeholder="Cidade"></div><div class="col-2"><input name="creditLimit" type="number" step="0.01" placeholder="Limite"></div></div><div class="actions"><button class="btn btn-primary">Salvar cliente</button></div></form>`); }
+function renderSuppliers(){ return simpleListPage('Fornecedores', state.suppliers, [
+  {label:'Código',render:x=>esc(x.code||'')}, {label:'Nome',render:x=>esc(x.name)}, {label:'Tipo',render:x=>esc(x.type)}, {label:'Telefone',render:x=>esc(x.phone)}, {label:'Cidade',render:x=>esc(x.city)}
+], `<form id="supplierForm"><div class="row"><div class="col-4"><input name="name" placeholder="Nome" required></div><div class="col-3"><select name="type"><option>peixe_vivo</option><option>revenda</option><option>prestador_servico</option><option>oficina</option><option>combustivel</option><option>financeiro</option><option>outros</option></select></div><div class="col-3"><input name="phone" placeholder="Telefone"></div><div class="col-2"><input name="city" placeholder="Cidade"></div></div><div class="actions"><button class="btn btn-primary">Salvar fornecedor</button></div></form>`); }
+function renderEmployees(){ return simpleListPage('Funcionários', state.employees, [
+  {label:'Nome',render:x=>esc(x.name)}, {label:'Cargo',render:x=>esc(x.role)}, {label:'Telefone',render:x=>esc(x.phone)}, {label:'Salário',render:x=>money(x.salary)}
+], `<form id="employeeForm"><div class="row"><div class="col-4"><input name="name" placeholder="Nome" required></div><div class="col-3"><input name="role" placeholder="Cargo"></div><div class="col-3"><input name="phone" placeholder="Telefone"></div><div class="col-2"><input name="salary" type="number" step="0.01" placeholder="Salário"></div></div><div class="actions"><button class="btn btn-primary">Salvar funcionário</button></div></form>`); }
+function renderInstitutions(){ return simpleListPage('Instituições de antecipação', state.institutions, [
+  {label:'Nome',render:x=>esc(x.name)}, {label:'Tipo',render:x=>esc(x.type)}, {label:'Telefone',render:x=>esc(x.phone)}
+], `<form id="institutionForm"><div class="row"><div class="col-4"><input name="name" placeholder="Nome" required></div><div class="col-3"><select name="type"><option>banco</option><option>factoring</option><option>fidc</option></select></div><div class="col-3"><input name="phone" placeholder="Telefone"></div></div><div class="actions"><button class="btn btn-primary">Salvar instituição</button></div></form>`); }
+function renderProducts(){ return `<div class="grid"><div class="card span-12"><h3>Novo produto</h3><form id="productForm"><div class="row"><div class="col-5"><input name="name" placeholder="Nome do produto" required></div><div class="col-3"><select name="type"><option value="producao_propria">produção própria</option><option value="revenda">revenda</option></select></div><div class="col-2"><input name="salePrice" type="number" step="0.01" placeholder="Preço venda"></div><div class="col-2"><input name="cost" type="number" step="0.01" placeholder="Custo inicial"></div></div><div class="actions"><button class="btn btn-primary">Salvar produto</button></div></form></div><div class="card span-12"><h3>Produtos</h3><div class="table-wrap"><table><thead><tr><th>Código</th><th>Nome</th><th>Tipo</th><th>Unidade</th><th class="right">Estoque</th><th class="right">Custo ref.</th></tr></thead><tbody>${state.products.map(p=>`<tr><td>${esc(p.code||'')}</td><td>${esc(p.name)}</td><td>${esc(p.type)}</td><td>${esc(p.unit)}</td><td class="right">${Number(p.stock||0).toFixed(2)}</td><td class="right">${money(p.cost||0)}</td></tr>`).join('')}</tbody></table></div></div></div>`; }
+function renderSales(){
+  const customerOptions = state.customers.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  const productOptions = state.products.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  const accountOptions = state.accounts.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`).join('');
+  const salesRows = state.sales.map(s=>`<tr><td>#${s.id}</td><td>${fmtDate(s.date)}</td><td>${esc(state.customers.find(c=>c.id==s.customerId)?.name||'')}</td><td class="right">${money(s.total)}</td><td>${esc(s.status||'')}</td></tr>`).join('');
+  return `<div class="grid"><div class="card span-12"><h3>Nova venda</h3>
+    <form id="saleForm">
+      <div class="row"><div class="col-4"><select name="customerId" required><option value="">Cliente</option>${customerOptions}</select></div><div class="col-4"><input type="date" name="date" required value="${new Date().toISOString().slice(0,10)}"></div><div class="col-4"><input name="note" placeholder="Observação"></div></div>
+      <div class="hr"></div>
+      <div class="muted">Item simples para MVP</div>
+      <div class="row"><div class="col-6"><select name="productId" required><option value="">Produto</option>${productOptions}</select></div><div class="col-3"><input type="number" step="0.01" name="qty" placeholder="Quantidade kg" required></div><div class="col-3"><input type="number" step="0.01" name="unitPrice" placeholder="Valor por kg" required></div></div>
+      <div class="hr"></div>
+      <div class="muted">Pagamento principal do MVP</div>
+      <div class="row"><div class="col-3"><select name="paymentType" id="paymentType"><option value="pix">PIX</option><option value="dinheiro">Dinheiro</option><option value="cheque">Cheque</option></select></div><div class="col-3"><select name="accountId"><option value="">Conta</option>${accountOptions}</select></div><div class="col-3"><input type="number" step="0.01" name="paymentValue" placeholder="Valor pagamento" required></div><div class="col-3"><input name="bank" placeholder="Banco cheque / obs"></div></div>
+      <div id="chequeFields" class="row hidden"><div class="col-3"><input name="chequeNumber" placeholder="Número do cheque"></div><div class="col-3"><input name="issuer" placeholder="Emitente"></div><div class="col-3"><input type="date" name="chequeDue"></div><div class="col-3"><input name="chequeBank" placeholder="Banco"></div></div>
+      <div class="actions"><button class="btn btn-primary">Salvar venda</button></div>
+    </form></div>
+    <div class="card span-12"><h3>Vendas lançadas</h3><div class="table-wrap"><table><thead><tr><th>Nº</th><th>Data</th><th>Cliente</th><th class="right">Total</th><th>Status</th></tr></thead><tbody>${salesRows || `<tr><td colspan="5" class="muted">Sem vendas.</td></tr>`}</tbody></table></div></div></div>`;
+}
+function renderCheques(){
+  return `<div class="grid"><div class="card span-12"><h3>Cheques</h3><div class="table-wrap"><table><thead><tr><th>Número</th><th>Cliente</th><th>Emitente</th><th>Banco</th><th class="right">Valor</th><th>Vencimento</th><th>Status</th><th>Ação</th></tr></thead><tbody>${state.cheques.length?state.cheques.map(c=>`<tr><td>${esc(c.number)}</td><td>${esc(state.customers.find(x=>x.id==c.customerId)?.name||'')}</td><td>${esc(c.issuer||'')}</td><td>${esc(c.bank||'')}</td><td class="right">${money(c.value)}</td><td>${fmtDate(c.dueDate)}</td><td><span class="pill ${c.status==='em_carteira'?'warning':c.status==='antecipado'?'info':c.status==='devolvido'?'danger':'success'}">${esc(c.status)}</span></td><td>${c.status==='em_carteira'?`<button class='btn btn-primary small' onclick='openBorderFromCheque(${c.id})'>Antecipar</button>`:c.status==='antecipado'?`<button class='btn btn-danger small' onclick='markReturned(${c.id})'>Devolvido</button>`:''}</td></tr>`).join(''):`<tr><td colspan="8" class="muted">Sem cheques.</td></tr>`}</tbody></table></div></div></div>`;
+}
+function renderBorders(){
+  const instOpts = state.institutions.map(i=>`<option value="${i.id}">${esc(i.name)}</option>`).join('');
+  const accOpts = state.accounts.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`).join('');
+  const available = state.cheques.filter(c=>c.status==='em_carteira');
+  return `<div class="grid"><div class="card span-12"><h3>Novo borderô</h3><form id="borderForm"><div class="row"><div class="col-3"><select name="institutionId" required><option value="">Instituição</option>${instOpts}</select></div><div class="col-3"><input type="date" name="date" required value="${new Date().toISOString().slice(0,10)}"></div><div class="col-3"><select name="accountId" required><option value="">Conta de entrada</option>${accOpts}</select></div><div class="col-3"><input type="number" step="0.01" name="liquidValue" placeholder="Valor líquido" required></div></div>
+  <div class="muted">Selecione os cheques em carteira</div>
+  <div class="table-wrap"><table><thead><tr><th></th><th>Número</th><th>Cliente</th><th class="right">Valor</th><th>Vencimento</th></tr></thead><tbody>${available.length?available.map(c=>`<tr><td><input type='checkbox' name='chequeIds' value='${c.id}'></td><td>${esc(c.number)}</td><td>${esc(state.customers.find(x=>x.id==c.customerId)?.name||'')}</td><td class='right'>${money(c.value)}</td><td>${fmtDate(c.dueDate)}</td></tr>`).join(''):`<tr><td colspan='5' class='muted'>Sem cheques disponíveis.</td></tr>`}</tbody></table></div><div class="actions"><button class="btn btn-primary">Salvar borderô</button></div></form></div>
+  <div class="card span-12"><h3>Borderôs lançados</h3><div class="table-wrap"><table><thead><tr><th>Data</th><th>Instituição</th><th class="right">Bruto</th><th class="right">Líquido</th><th class="right">Taxa</th><th>Conta</th></tr></thead><tbody>${state.borders.length?state.borders.map(b=>`<tr><td>${fmtDate(b.date)}</td><td>${esc(state.institutions.find(i=>i.id==b.institutionId)?.name||'')}</td><td class='right'>${money(b.grossValue)}</td><td class='right'>${money(b.liquidValue)}</td><td class='right'>${money(b.fee)}</td><td>${esc(state.accounts.find(a=>a.id==b.accountId)?.name||'')}</td></tr>`).join(''):`<tr><td colspan='6' class='muted'>Sem borderôs.</td></tr>`}</tbody></table></div></div></div>`;
+}
+function renderFinance(){
+  const favOptions = `<option value='cliente'>Cliente</option><option value='fornecedor'>Fornecedor</option><option value='funcionario'>Funcionário</option><option value='instituicao'>Instituição</option><option value='outro'>Outro</option>`;
+  const accOpts = state.accounts.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`).join('');
+  const lines = state.finance.slice().reverse().map(f=>`<tr><td>${fmtDate(f.date)}</td><td>${esc(f.type)}</td><td>${esc(f.category)}</td><td>${esc(f.partyName||'')}</td><td>${esc(state.accounts.find(a=>a.id==f.accountId)?.name||'')}</td><td class='right'>${money(f.value)}</td><td>${esc(f.origin||'manual')}</td></tr>`).join('');
+  return `<div class="grid"><div class="card span-12"><h3>Novo lançamento financeiro</h3><form id="financeForm"><div class="row"><div class="col-2"><select name="type"><option value='entrada'>Entrada</option><option value='saida'>Saída</option></select></div><div class="col-3"><input name="category" placeholder="Categoria" required></div><div class="col-2"><select name="partyType">${favOptions}</select></div><div class="col-3"><input name="partyName" placeholder="Favorecido"></div><div class="col-2"><input type="date" name="date" value="${new Date().toISOString().slice(0,10)}"></div></div><div class="row"><div class="col-3"><select name="accountId" required><option value=''>Conta</option>${accOpts}</select></div><div class="col-3"><input type="number" step="0.01" name="value" placeholder="Valor" required></div><div class="col-6"><input name="description" placeholder="Descrição"></div></div><div class="actions"><button class="btn btn-primary">Salvar lançamento</button></div></form></div>
+    <div class="card span-12"><h3>Lançamentos</h3><div class="table-wrap"><table><thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Favorecido</th><th>Conta</th><th class='right'>Valor</th><th>Origem</th></tr></thead><tbody>${lines || `<tr><td colspan='7' class='muted'>Sem lançamentos.</td></tr>`}</tbody></table></div></div></div>`;
+}
+function bindForms(){
+  document.getElementById('customerForm')?.addEventListener('submit', async e=>{ e.preventDefault(); const f=new FormData(e.target); try{ await apiPost('/clientes',{ codigo: nextCode('CLI', state.customers), nome:f.get('name'), telefone:f.get('phone'), cidade:f.get('city'), limite_credito:Number(f.get('creditLimit')||0)||null }); await syncRemoteCadastros(); e.target.reset(); }catch(err){ alert(err.message||'Erro ao salvar cliente'); } });
+  document.getElementById('supplierForm')?.addEventListener('submit', async e=>{ e.preventDefault(); const f=new FormData(e.target); try{ await apiPost('/fornecedores',{ codigo: nextCode('FOR', state.suppliers), nome:f.get('name'), tipo:f.get('type'), telefone:f.get('phone'), cidade:f.get('city') }); await syncRemoteCadastros(); e.target.reset(); }catch(err){ alert(err.message||'Erro ao salvar fornecedor'); } });
+  document.getElementById('employeeForm')?.addEventListener('submit', e=>{ e.preventDefault(); const f=new FormData(e.target); state.employees.push({id:nextId(state.employees), name:f.get('name'), role:f.get('role'), phone:f.get('phone'), salary:Number(f.get('salary')||0)}); save(); e.target.reset(); });
+  document.getElementById('institutionForm')?.addEventListener('submit', e=>{ e.preventDefault(); const f=new FormData(e.target); state.institutions.push({id:nextId(state.institutions), name:f.get('name'), type:f.get('type'), phone:f.get('phone')}); save(); e.target.reset(); });
+  document.getElementById('productForm')?.addEventListener('submit', async e=>{ e.preventDefault(); const f=new FormData(e.target); const code=nextCode('PRO', state.products); const cost=Number(f.get('cost')||0); try{ await apiPost('/produtos',{ codigo: code, nome:f.get('name'), tipo:f.get('type'), unidade:'kg' }); await syncRemoteCadastros(); const p = state.products.find(x=>x.code===code); if(p){ p.cost=cost; p.salePrice=Number(f.get('salePrice')||0); localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); render(); } e.target.reset(); }catch(err){ alert(err.message||'Erro ao salvar produto'); } });
+  const pType=document.getElementById('paymentType'); const chequeFields=document.getElementById('chequeFields'); if(pType&&chequeFields){ const toggle=()=> chequeFields.classList.toggle('hidden', pType.value!=='cheque'); pType.addEventListener('change',toggle); toggle(); }
+  document.getElementById('saleForm')?.addEventListener('submit', e=>{ e.preventDefault(); const f=new FormData(e.target); const qty=Number(f.get('qty')||0), unitPrice=Number(f.get('unitPrice')||0), total=qty*unitPrice;
+    const sale={id:nextId(state.sales), customerId:Number(f.get('customerId')), date:f.get('date'), note:f.get('note'), items:[{productId:Number(f.get('productId')), qty, unitPrice, total}], total, status:'recebida', receivedImmediate:0, receivedByBorders:0, returnedCheques:0};
+    const paymentType=f.get('paymentType'); const paymentValue=Number(f.get('paymentValue')||0); if(Math.abs(paymentValue-total)>0.01){ alert('No MVP simples, o pagamento precisa bater com o total da venda.'); return; }
+    if(paymentType==='pix' || paymentType==='dinheiro'){
+      sale.receivedImmediate = paymentValue;
+      state.finance.push({id:nextId(state.finance), type:'entrada', category:'recebimento de venda', partyType:'cliente', partyName:state.customers.find(c=>c.id==sale.customerId)?.name||'', accountId:Number(f.get('accountId')), value:paymentValue, date:sale.date, description:`Venda #${sale.id}`, origin:'venda'});
+    } else if(paymentType==='cheque'){
+      const cheque={id:nextId(state.cheques), saleId:sale.id, customerId:sale.customerId, number:f.get('chequeNumber'), issuer:f.get('issuer'), dueDate:f.get('chequeDue'), value:paymentValue, bank:f.get('chequeBank')||f.get('bank'), status:'em_carteira'};
+      if(!cheque.number){ alert('Informe o número do cheque.'); return; }
+      state.cheques.push(cheque);
+      sale.status='parcialmente_recebida';
+    }
+    const prod=state.products.find(p=>p.id==sale.items[0].productId); if(prod) prod.stock = Number(prod.stock||0)-qty;
+    state.sales.push(sale); save(); e.target.reset(); });
+  document.getElementById('borderForm')?.addEventListener('submit', e=>{ e.preventDefault(); const f=new FormData(e.target); const ids=f.getAll('chequeIds').map(Number); if(!ids.length){ alert('Selecione ao menos um cheque.'); return; } const cheques=state.cheques.filter(c=>ids.includes(c.id)); const grossValue=cheques.reduce((s,c)=>s+Number(c.value||0),0); const liquidValue=Number(f.get('liquidValue')||0); const fee=grossValue-liquidValue; const border={id:nextId(state.borders), institutionId:Number(f.get('institutionId')), date:f.get('date'), accountId:Number(f.get('accountId')), grossValue, liquidValue, fee, chequeIds:ids}; state.borders.push(border); cheques.forEach(c=> c.status='antecipado');
+    const instName=state.institutions.find(i=>i.id==border.institutionId)?.name||'';
+    state.finance.push({id:nextId(state.finance), type:'entrada', category:'antecipação de borderô', partyType:'instituicao', partyName:instName, accountId:border.accountId, value:liquidValue, date:border.date, description:`Borderô #${border.id}`, origin:'bordero'});
+    if(fee>0) state.finance.push({id:nextId(state.finance), type:'saida', category:'taxa de antecipação', partyType:'instituicao', partyName:instName, accountId:border.accountId, value:fee, date:border.date, description:`Taxa borderô #${border.id}`, origin:'bordero'});
+    border.chequeIds.forEach(id=>{ const sale=state.sales.find(s=>s.id===state.cheques.find(c=>c.id===id)?.saleId); if(sale) sale.receivedByBorders=(sale.receivedByBorders||0)+Number(state.cheques.find(c=>c.id===id)?.value||0); });
+    save(); e.target.reset(); });
+  document.getElementById('financeForm')?.addEventListener('submit', e=>{ e.preventDefault(); const f=new FormData(e.target); state.finance.push({id:nextId(state.finance), type:f.get('type'), category:f.get('category'), partyType:f.get('partyType'), partyName:f.get('partyName'), accountId:Number(f.get('accountId')), value:Number(f.get('value')), date:f.get('date'), description:f.get('description'), origin:'manual'}); save(); e.target.reset(); });
+}
+function openBorderFromCheque(id){ go('borders'); setTimeout(()=>{ const cb=document.querySelector(`input[name='chequeIds'][value='${id}']`); if(cb) cb.checked=true; },0); }
+function markReturned(id){ const cheque=state.cheques.find(c=>c.id===id); if(!cheque) return; const fee=Number(prompt('Taxa de devolução do cheque', '0')||0); const accountId=Number(prompt('Conta de saída: 1 Caixa, 2 Uai Sicoob, 3 Uai Itaú, 4 HM Itaú', '2')||2); cheque.status='devolvido'; const sale=state.sales.find(s=>s.id===cheque.saleId); if(sale) sale.returnedCheques=(sale.returnedCheques||0)+Number(cheque.value||0);
+  state.finance.push({id:nextId(state.finance), type:'saida', category:'devolução de cheque', partyType:'instituicao', partyName:'Instituição', accountId, value:Number(cheque.value)+fee, date:new Date().toISOString().slice(0,10), description:`Cheque devolvido ${cheque.number}`, origin:'devolucao_cheque'});
+  save();
+}
+function seed(){
+  state = structuredClone(defaultData);
+  state.customers=[{id:1,name:'Cliente Exemplo',phone:'(37)99999-0000',city:'Arcos',creditLimit:20000}];
+  state.suppliers=[{id:1,name:'Fornecedor Tilápia',type:'peixe_vivo',phone:'(37)98888-0000',city:'Arcos'}];
+  state.institutions=[{id:1,name:'Factoring Exemplo',type:'factoring',phone:'(37)97777-0000'}];
+  state.products=defaultData.products.map(p=>({...p,stock:200,cost:18}));
+  save();
+}
+document.getElementById('seedBtn').onclick=()=>{ seed(); };
+document.getElementById('resetBtn').onclick=()=>{ if(confirm('Limpar todos os dados locais?')){ localStorage.removeItem(STORAGE_KEY); state=load(); render(); } };
+document.getElementById('menuToggle').onclick=()=>toggleMobileMenu();
+document.getElementById('mobileBackdrop').onclick=()=>closeMobileMenu();
+window.addEventListener('resize', ()=>{ if(!isMobile()) closeMobileMenu(); });
+render();
+syncRemoteCadastros();
+</script>
+</body>
+</html>
