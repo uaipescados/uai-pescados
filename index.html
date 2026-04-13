@@ -106,8 +106,8 @@
   function nextCode(prefix, arr){ var max=0; for(var i=0;i<arr.length;i++){ var c=String(arr[i].code||''); var m=c.match(/(\d+)$/); if(m){ var n=Number(m[1]); if(n>max) max=n; } } return prefix + String(max+1).padStart(4,'0'); }
   var API_BASE='https://uai-pescados-backend.onrender.com';
   async function apiGet(path){ var r=await fetch(API_BASE+path); if(!r.ok) throw new Error('Erro ao carregar '+path); return await r.json(); }
-  async function apiPost(path, body){ var r=await fetch(API_BASE+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); var j=await r.json(); if(!r.ok) throw new Error(j.error||('Erro ao salvar '+path)); return j; }
-  async function apiPut(path, body){ var r=await fetch(API_BASE+path,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); var j=await r.json(); if(!r.ok) throw new Error(j.error||('Erro ao salvar '+path)); return j; }
+  async function apiPost(path, body){ var r=await fetch(API_BASE+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); var t=await r.text(); var j={}; try{ j=t?JSON.parse(t):{}; }catch(e){ if(!r.ok) throw new Error('Erro ao salvar '+path); return {}; } if(!r.ok) throw new Error(j.error||('Erro ao salvar '+path)); return j; }
+  async function apiPut(path, body){ var r=await fetch(API_BASE+path,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); var t=await r.text(); var j={}; try{ j=t?JSON.parse(t):{}; }catch(e){ if(!r.ok) throw new Error('Erro ao salvar '+path); return {}; } if(!r.ok) throw new Error(j.error||('Erro ao salvar '+path)); return j; }
   async function apiDelete(path){ var r=await fetch(API_BASE+path,{method:'DELETE'}); var j={}; try{ j=await r.json(); }catch(e){} if(!r.ok) throw new Error(j.error||('Erro ao excluir '+path)); return j; }
   async function syncRemoteCadastros(){
     try{
@@ -123,9 +123,10 @@
         apiGet('/compras'),
         apiGet('/lotes'),
         apiGet('/producoes'),
-        apiGet('/estoque-movimentos')
+        apiGet('/estoque-movimentos'),
+        apiGet('/antecipacoes')
       ]);
-      var customers=remote[0], suppliers=remote[1], products=remote[2], sales=remote[3], cheques=remote[4], finance=remote[5], receivables=remote[6], payables=remote[7], purchases=remote[8], lots=remote[9], productions=remote[10], stockMoves=remote[11];
+      var customers=remote[0], suppliers=remote[1], products=remote[2], sales=remote[3], cheques=remote[4], finance=remote[5], receivables=remote[6], payables=remote[7], purchases=remote[8], lots=remote[9], productions=remote[10], stockMoves=remote[11], borders=remote[12];
       state.customers = customers.map(function(x){ return {id:x.id, code:x.codigo||'', name:x.nome||'', phone:x.telefone||'', city:x.cidade||'', creditLimit:Number(x.limite_credito||0)||0, observacoes:x.observacoes||''}; });
       state.suppliers = suppliers.map(function(x){ return {id:x.id, code:x.codigo||'', name:x.nome||'', type:x.tipo||'', phone:x.telefone||'', city:x.cidade||'', observacoes:x.observacoes||''}; });
       var localProductMap={};
@@ -142,6 +143,7 @@
       state.lots = lots.map(function(l){ return { id:l.id, code:l.codigo||'', supplierId:Number(l.fornecedor_id||0), date:l.data_lote||'', qtyKg:Number(l.quantidade_kg||0), priceKg:Number(l.valor_kg||0), freight:Number(l.frete||0), totalCost:Number(l.valor_total||0), status:l.status||'disponível', obs:l.observacoes||'' }; });
       state.productions = productions.map(function(p){ return { id:p.id, code:p.codigo||'', lotId:Number(p.lote_id||0), provider:p.prestador||'', date:p.data_producao||'', totalQty:Number(p.quantidade_total||0), totalCost:Number(p.custo_total||0), items:(p.itens||[]).map(function(i){ return { productId:Number(i.produto_id||0), qty:Number(i.quantidade_kg||0), unitCost:Number(i.custo_unitario||0), total:Number(i.valor_total||0) }; }) }; });
       state.stockMoves = stockMoves.map(function(m){ return { id:m.id, productId:Number(m.produto_id||0), type:m.tipo||'', origin:m.origem||'', originId:Number(m.origem_id||0), qty:Number(m.quantidade_kg||0), cost:Number(m.valor_unitario||0), date:m.data_movimento||'' }; });
+      state.borders = borders.map(function(b){ return { id:b.id, code:b.codigo||'', date:b.data_lancamento||'', institutionId:'', institution:b.instituicao||'', gross:Number(b.valor_bruto||0), net:Number(b.valor_liquido||0), fee:Number(b.valor_taxa||0), accountId:Number(b.conta_id||0)||'', bordero:b.bordero||'', obs:b.observacoes||'' }; });
 
       for(var j=0;j<state.products.length;j++){
         var prod=state.products[j];
@@ -446,10 +448,10 @@
     var instOpts=optionsFrom(state.institutions,function(i){return i.name;});
     var accOpts=optionsFrom(state.accounts,function(a){return a.name;});
     var chequeRows='';
-    state.cheques.forEach(function(c){ if(c.status==='em carteira') chequeRows+='<tr><td><input type="checkbox" name="borderCheque" value="'+c.id+'" /></td><td>'+c.number+'</td><td>'+customerName(c.customerId)+'</td><td>'+money(c.value)+'</td><td>'+(c.dueDate||'')+'</td></tr>'; });
+    state.cheques.forEach(function(c){ if(c.status==='em carteira') chequeRows+='<tr><td><input type="checkbox" class="border-cheque" name="borderCheque" value="'+c.id+'" data-value="'+Number(c.value||0)+'" /></td><td>'+c.number+'</td><td>'+customerName(c.customerId)+'</td><td>'+money(c.value)+'</td><td>'+(c.dueDate||'')+'</td></tr>'; });
     var rows='';
-    state.borders.slice().reverse().forEach(function(b){ rows+='<tr><td>'+(b.code||('#'+b.id))+'</td><td>'+b.date+'</td><td>'+institutionName(b.institutionId)+'</td><td>'+money(b.gross)+'</td><td>'+money(b.net)+'</td><td>'+money(b.fee)+'</td><td>'+accountName(b.accountId)+'</td></tr>'; });
-    return '<div class="grid two"><div class="card"><h3>Novo borderô</h3><form id="form_borders"><div class="row-2"><div><label>Instituição</label><select name="institutionId">'+instOpts+'</select></div><div><label>Data</label><input type="date" name="date" value="'+today()+'" /></div><div><label>Conta de entrada</label><select name="accountId">'+accOpts+'</select></div><div><label>Valor líquido</label><input name="net" type="number" step="0.01" /></div></div><label>Observação</label><input name="obs" /><h3 style="margin-top:14px">Cheques em carteira</h3><table><thead><tr><th></th><th>Número</th><th>Cliente</th><th>Valor</th><th>Venc.</th></tr></thead><tbody>'+chequeRows+'</tbody></table><div class="toolbar" style="margin-top:12px"><button type="submit" class="btn">Salvar borderô</button></div></form></div><div class="card"><h3>Borderôs</h3><table><thead><tr><th>Nº</th><th>Data</th><th>Instituição</th><th>Bruto</th><th>Líquido</th><th>Taxa</th><th>Conta</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+    state.borders.slice().reverse().forEach(function(b){ rows+='<tr><td>'+(b.bordero||b.code||('#'+b.id))+'</td><td>'+b.date+'</td><td>'+(b.institution||institutionName(b.institutionId)||'')+'</td><td>'+money(b.gross)+'</td><td>'+money(b.net)+'</td><td>'+money(b.fee)+'</td><td>'+accountName(b.accountId)+'</td></tr>'; });
+    return '<div class="grid two"><div class="card"><h3>Novo borderô</h3><form id="form_borders"><div class="row-2"><div><label>Instituição</label><select name="institutionId">'+instOpts+'</select></div><div><label>Data</label><input type="date" name="date" value="'+today()+'" /></div><div><label>Conta de entrada</label><select name="accountId">'+accOpts+'</select></div><div><label>Número do borderô</label><input name="bordero" /></div><div><label>Valor bruto</label><input name="gross" type="number" step="0.01" readonly /></div><div><label>Valor líquido</label><input name="net" type="number" step="0.01" /></div><div><label>Taxa</label><input name="fee" type="number" step="0.01" readonly /></div></div><label>Observação</label><input name="obs" /><h3 style="margin-top:14px">Cheques em carteira</h3><table><thead><tr><th></th><th>Número</th><th>Cliente</th><th>Valor</th><th>Venc.</th></tr></thead><tbody>'+chequeRows+'</tbody></table><div class="toolbar" style="margin-top:12px"><button type="submit" class="btn">Salvar borderô</button></div></form></div><div class="card"><h3>Borderôs</h3><table><thead><tr><th>Borderô</th><th>Data</th><th>Instituição</th><th>Bruto</th><th>Líquido</th><th>Taxa</th><th>Conta</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
   }
   function renderFinance(){
     var accOpts=optionsFrom(state.accounts,function(a){return a.name;});
@@ -671,6 +673,50 @@
     };
     var editBtns=document.querySelectorAll('.btn-edit-sale');
     for(var j=0;j<editBtns.length;j++) editBtns[j].onclick=function(){ startEditSale(Number(this.getAttribute('data-id'))); };
+  }
+
+
+  function bindBorders(){
+    var f=document.getElementById('form_borders');
+    if(!f) return;
+    var checks=f.querySelectorAll('.border-cheque');
+    function recalc(){
+      var gross=0;
+      for(var i=0;i<checks.length;i++) if(checks[i].checked) gross += Number(checks[i].getAttribute('data-value')||0);
+      if(f.elements.gross) f.elements.gross.value = gross.toFixed(2);
+      var net=Number(f.elements.net.value||0);
+      if(f.elements.fee) f.elements.fee.value = Math.max(0, gross-net).toFixed(2);
+    }
+    for(var i=0;i<checks.length;i++) checks[i].onchange=recalc;
+    if(f.elements.net) f.elements.net.oninput=recalc;
+    recalc();
+    f.onsubmit=async function(e){
+      e.preventDefault();
+      var ids=[];
+      for(var i=0;i<checks.length;i++) if(checks[i].checked) ids.push(Number(checks[i].value));
+      if(!ids.length) return alert('Selecione ao menos um cheque.');
+      var institutionId=Number(f.elements.institutionId.value||0);
+      var inst=byId(state.institutions, institutionId);
+      try{
+        await apiPost('/antecipacoes',{
+          codigo: nextCode('BOR', state.borders),
+          institutionId: institutionId || null,
+          institution: inst ? inst.name : '',
+          date: f.elements.date.value,
+          accountId: Number(f.elements.accountId.value||0) || null,
+          bordero: f.elements.bordero.value||'',
+          gross: Number(f.elements.gross.value||0),
+          net: Number(f.elements.net.value||0),
+          fee: Number(f.elements.fee.value||0),
+          chequeIds: ids,
+          obs: f.elements.obs.value||''
+        });
+        f.reset();
+        f.elements.date.value=today();
+        await syncRemoteCadastros();
+        render(); setPage('borders');
+      }catch(err){ alert(err.message||'Erro ao salvar borderô.'); }
+    };
   }
 
   function bindFinance(){
