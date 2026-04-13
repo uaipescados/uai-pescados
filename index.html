@@ -87,7 +87,7 @@
     {id:'financeiro', title:'Financeiro', items:[['finance','Lançamentos'],['receivables','Contas a Receber'],['payables','Contas a Pagar'],['transfers','Transferências']]}
   ];
   var menuOpenState={principal:true,cadastros:false,producao:false,financeiro:false};
-  var uiState={receivableSettleId:null,payableSettleId:null,editingCustomerId:null,editingSupplierId:null,editingEmployeeId:null,editingInstitutionId:null,editingProductId:null};
+  var uiState={receivableSettleId:null,payableSettleId:null,editingCustomerId:null,editingSupplierId:null,editingEmployeeId:null,editingInstitutionId:null,editingProductId:null,borderSelectedIds:[],borderQuickSelectIds:[]};
 
   // garante códigos nos cadastros antigos
   (function ensureCodes(){
@@ -111,9 +111,9 @@
   async function syncRemoteCadastros(){
     try{
       var remote = await Promise.all([
-        apiGet('/clientes'), apiGet('/fornecedores'), apiGet('/produtos'), apiGet('/vendas'), apiGet('/cheques'), apiGet('/financeiro'), apiGet('/contas-receber')
+        apiGet('/clientes'), apiGet('/fornecedores'), apiGet('/produtos'), apiGet('/vendas'), apiGet('/cheques'), apiGet('/financeiro'), apiGet('/contas-receber'), apiGet('/antecipacoes')
       ]);
-      var customers=remote[0], suppliers=remote[1], products=remote[2], sales=remote[3], cheques=remote[4], finance=remote[5], receivables=remote[6];
+      var customers=remote[0], suppliers=remote[1], products=remote[2], sales=remote[3], cheques=remote[4], finance=remote[5], receivables=remote[6], antecipacoes=remote[7];
       state.customers = customers.map(function(x){ return {id:x.id, code:x.codigo||'', name:x.nome||'', phone:x.telefone||'', city:x.cidade||'', creditLimit:Number(x.limite_credito||0)||0, observacoes:x.observacoes||''}; });
       state.suppliers = suppliers.map(function(x){ return {id:x.id, code:x.codigo||'', name:x.nome||'', type:x.tipo||'', phone:x.telefone||'', city:x.cidade||'', observacoes:x.observacoes||''}; });
       var localProductMap={};
@@ -124,7 +124,8 @@
       });
       state.cheques = cheques.map(function(c){ return { id:c.id, code:c.codigo||'', saleId:Number(c.venda_id||0), customerId:Number(c.cliente_id||0), number:c.numero_cheque||'', bank:c.banco||'', emitter:c.emitente_nome||'', value:Number(c.valor||0), dueDate:c.data_vencimento||'', status:c.status||'em carteira' }; });
       state.finance = finance.map(function(f){ return { id:f.id, code:f.codigo||'', type:f.tipo||'', category:f.categoria||'', partyName:f.favorecido||'', accountId:Number(f.conta_id||0)||'', date:f.data_lancamento||'', value:Number(f.valor||0), origin:f.origem||'', obs:f.observacoes||'' }; });
-      state.receivables = receivables.map(function(r){ return { id:r.id, code:r.codigo||'', customerId:Number(r.cliente_id||0)||'', partyName:r.nome_cliente||'', category:r.categoria||'', originalValue:Number(r.valor_original||0), openValue:Number(r.valor_aberto||0), date:r.data_vencimento||r.data_lancamento||'', status:r.status||'aberto', origin:r.origem||'', accountId:Number(r.conta_id||0)||'', obs:r.observacoes||'' }; });
+      state.receivables = receivables.map(function(r){ return { id:r.id, code:r.codigo||'', customerId:Number(r.cliente_id||0)||'', partyName:r.nome_cliente||'', category:r.categoria||'', originalValue:Number(r.valor_original||0), openValue:Number(r.valor_aberto||0), date:r.data_vencimento||r.data_lancamento||'', status:r.status||'aberto', origin:r.origem||'', accountId:Number(r.conta_id||0)||'', obs:r.observacoes||'', antecipacaoId:Number(r.antecipacao_id||0)||'' }; });
+      state.borders = (antecipacoes||[]).map(function(b){ return { id:b.id, code:b.codigo||'', date:b.data_lancamento||'', institution:b.instituicao||'', bordero:b.bordero||'', accountId:Number(b.conta_id||0)||'', gross:Number(b.valor_bruto||0), net:Number(b.valor_liquido||0), fee:Number(b.valor_taxa||0), status:b.status||'efetivado', obs:b.observacoes||'', items:(b.itens||[]).map(function(it){ return { receivableId:Number(it.conta_receber_id||0)||'', chequeId:Number(it.cheque_id||0)||'', value:Number(it.valor||0), customerName:it.nome_cliente||'', category:it.categoria||'', chequeNumber:it.numero_cheque||'' }; }) }; });
       save();
     }catch(err){ console.error(err); }
   }
@@ -136,6 +137,24 @@
   function supplierName(id){ var s=byId(state.suppliers,id); return s?s.name:''; }
   function productName(id){ var p=byId(state.products,id); return p?p.name:''; }
   function institutionName(id){ var x=byId(state.institutions,id); return x?x.name:''; }
+  function receivableType(r){
+    var c=String((r&&r.category)||'').toLowerCase();
+    if(c.indexOf('cheque')>=0) return 'cheque';
+    if(c.indexOf('boleto')>=0) return 'boleto';
+    if(c.indexOf('cart')>=0) return 'cartao';
+    return 'outro';
+  }
+  function borderEligibleReceivables(){
+    return state.receivables.filter(function(r){
+      var st=String(r.status||'').toLowerCase();
+      var tp=receivableType(r);
+      return (tp==='cheque' || tp==='boleto' || tp==='cartao') && (st==='aberto' || st==='parcial' || st==='devolvido');
+    });
+  }
+  function borderSelectedReceivables(){
+    var ids=(uiState.borderSelectedIds||[]).map(function(x){ return Number(x); });
+    return borderEligibleReceivables().filter(function(r){ return ids.indexOf(Number(r.id))>=0; });
+  }
   function startReceiveReceivable(id){ uiState.receivableSettleId=Number(id); setPage('receivables'); }
   window.startEditCadastro = function startEditCadastro(kind,id){ var key='editing'+kind.charAt(0).toUpperCase()+kind.slice(1)+'Id'; uiState[key]=Number(id); setPage(kind==='product'?'products':kind+'s'); }
   window.clearEditCadastro = function clearEditCadastro(kind){ var key='editing'+kind.charAt(0).toUpperCase()+kind.slice(1)+'Id'; uiState[key]=null; setPage(kind==='product'?'products':kind+'s'); }
@@ -393,20 +412,40 @@
   }
   function renderCheques(){
     var rows='';
-    state.cheques.slice().reverse().forEach(function(c){ rows+='<tr><td>'+(c.code||'')+'</td><td>'+c.number+'</td><td>'+customerName(c.customerId)+'</td><td>'+(c.emitter||'')+'</td><td>'+(c.bank||'')+'</td><td>'+money(c.value)+'</td><td>'+(c.dueDate||'')+'</td><td><span class="pill">'+c.status+'</span></td><td class="list-actions">'+
-      (c.status==='em carteira'?'<button class="btn secondary action-border" data-id="'+c.id+'">Antecipar</button>':'')+
-      (c.status==='antecipado'?'<button class="btn danger action-return" data-id="'+c.id+'">Devolvido</button>':'')+
-      '</td></tr>'; });
+    state.cheques.slice().reverse().forEach(function(c){
+      var linkedRec = null;
+      for(var rr=0; rr<state.receivables.length; rr++){
+        var rec = state.receivables[rr];
+        if(receivableType(rec)==='cheque' && Number(rec.customerId)===Number(c.customerId) && Number(rec.originalValue||0)===Number(c.value||0) && String(rec.date||'')===String(c.dueDate||'')){ linkedRec = rec; break; }
+      }
+      rows+='<tr><td>'+(c.code||'')+'</td><td>'+c.number+'</td><td>'+customerName(c.customerId)+'</td><td>'+(c.emitter||'')+'</td><td>'+(c.bank||'')+'</td><td>'+money(c.value)+'</td><td>'+(c.dueDate||'')+'</td><td><span class="pill">'+c.status+'</span></td><td class="list-actions">'+
+      ((c.status==='em carteira' && linkedRec)?'<button type="button" class="btn secondary action-border" data-receivable-id="'+linkedRec.id+'" data-id="'+c.id+'">Antecipar</button>':'')+
+      ((c.status==='antecipado' && linkedRec)?'<button type="button" class="btn danger action-return" data-receivable-id="'+linkedRec.id+'" data-id="'+c.id+'">Devolvido</button>':'')+
+      '</td></tr>';
+    });
     return '<div class="card"><h3>Cheques</h3><table><thead><tr><th>Código</th><th>Número</th><th>Cliente</th><th>Emitente</th><th>Banco</th><th>Valor</th><th>Venc.</th><th>Status</th><th>Ações</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
   }
   function renderBorders(){
-    var instOpts=optionsFrom(state.institutions,function(i){return i.name;});
+    var instOpts='<option value="">Selecione</option>';
+    state.institutions.forEach(function(i){ instOpts+='<option value="'+i.id+'">'+i.name+'</option>'; });
     var accOpts=optionsFrom(state.accounts,function(a){return a.name;});
-    var chequeRows='';
-    state.cheques.forEach(function(c){ if(c.status==='em carteira') chequeRows+='<tr><td><input type="checkbox" name="borderCheque" value="'+c.id+'" /></td><td>'+c.number+'</td><td>'+customerName(c.customerId)+'</td><td>'+money(c.value)+'</td><td>'+(c.dueDate||'')+'</td></tr>'; });
+    var selecionados=borderSelectedReceivables();
+    var bruto=selecionados.reduce(function(s,r){ return s + Number(r.openValue||0); },0);
+    var selectedMap={};
+    (uiState.borderSelectedIds||[]).forEach(function(id){ selectedMap[String(id)] = true; });
+    var titleRows='';
+    borderEligibleReceivables().forEach(function(r){
+      titleRows+='<tr><td><input type="checkbox" class="border-title" value="'+r.id+'" '+(selectedMap[String(r.id)]?'checked':'')+' /></td><td>'+(r.code||'')+'</td><td>'+(r.partyName||customerName(r.customerId)||'')+'</td><td>'+(receivableType(r))+'</td><td>'+money(r.openValue)+'</td><td>'+(r.date||'')+'</td><td>'+(r.status||'')+'</td></tr>';
+    });
+    if(!titleRows) titleRows='<tr><td colspan="7" class="muted">Não há títulos elegíveis para antecipação.</td></tr>';
     var rows='';
-    state.borders.slice().reverse().forEach(function(b){ rows+='<tr><td>'+(b.code||('#'+b.id))+'</td><td>'+b.date+'</td><td>'+institutionName(b.institutionId)+'</td><td>'+money(b.gross)+'</td><td>'+money(b.net)+'</td><td>'+money(b.fee)+'</td><td>'+accountName(b.accountId)+'</td></tr>'; });
-    return '<div class="grid two"><div class="card"><h3>Novo borderô</h3><form id="form_borders"><div class="row-2"><div><label>Instituição</label><select name="institutionId">'+instOpts+'</select></div><div><label>Data</label><input type="date" name="date" value="'+today()+'" /></div><div><label>Conta de entrada</label><select name="accountId">'+accOpts+'</select></div><div><label>Valor líquido</label><input name="net" type="number" step="0.01" /></div></div><label>Observação</label><input name="obs" /><h3 style="margin-top:14px">Cheques em carteira</h3><table><thead><tr><th></th><th>Número</th><th>Cliente</th><th>Valor</th><th>Venc.</th></tr></thead><tbody>'+chequeRows+'</tbody></table><div class="toolbar" style="margin-top:12px"><button type="submit" class="btn">Salvar borderô</button></div></form></div><div class="card"><h3>Borderôs</h3><table><thead><tr><th>Nº</th><th>Data</th><th>Instituição</th><th>Bruto</th><th>Líquido</th><th>Taxa</th><th>Conta</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+    state.borders.slice().reverse().forEach(function(b){
+      var desc=(b.items||[]).map(function(it){ return (it.customerName||'')+' '+(it.chequeNumber?('CHQ '+it.chequeNumber):''); }).filter(Boolean).join(', ');
+      rows+='<tr><td>'+(b.code||('#'+b.id))+'</td><td>'+(b.bordero||'')+'</td><td>'+b.date+'</td><td>'+(b.institution||'')+'</td><td>'+money(b.gross)+'</td><td>'+money(b.net)+'</td><td>'+money(b.fee)+'</td><td>'+accountName(b.accountId)+'</td><td>'+(desc||'-')+'</td></tr>';
+    });
+    var quickInfo='';
+    if((uiState.borderQuickSelectIds||[]).length){ quickInfo='<div class="warning" style="margin-bottom:10px">Título enviado do submenu de cheques já pré-selecionado para antecipação.</div>'; }
+    return '<div class="grid two"><div class="card"><h3>Nova antecipação / borderô</h3>'+quickInfo+'<form id="form_borders"><div class="row-2"><div><label>Instituição</label><select name="institutionId">'+instOpts+'</select></div><div><label>Data</label><input type="date" name="date" value="'+today()+'" /></div><div><label>Conta de entrada</label><select name="accountId">'+accOpts+'</select></div><div><label>Borderô</label><input name="bordero" placeholder="Número do borderô" /></div><div><label>Valor bruto</label><input name="gross" type="number" step="0.01" value="'+bruto.toFixed(2)+'" readonly /></div><div><label>Valor líquido</label><input name="net" type="number" step="0.01" /></div><div><label>Taxa / despesa</label><input name="fee" type="number" step="0.01" value="0.00" readonly /></div><div><label>Total títulos</label><input name="qtyTitles" value="'+selecionados.length+'" readonly /></div></div><label>Observação</label><input name="obs" /><h3 style="margin-top:14px">Títulos elegíveis</h3><table><thead><tr><th><input type="checkbox" id="borderSelectAll" /></th><th>Código</th><th>Cliente</th><th>Tipo</th><th>Em aberto</th><th>Venc.</th><th>Status</th></tr></thead><tbody>'+titleRows+'</tbody></table><div class="toolbar" style="margin-top:12px"><button type="submit" class="btn">Salvar antecipação</button></div></form></div><div class="card"><h3>Antecipações</h3><table><thead><tr><th>Código</th><th>Borderô</th><th>Data</th><th>Instituição</th><th>Bruto</th><th>Líquido</th><th>Taxa</th><th>Conta</th><th>Títulos</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
   }
   function renderFinance(){
     var accOpts=optionsFrom(state.accounts,function(a){return a.name;});
@@ -607,6 +646,92 @@
     };
   }
   function bindTransfers(){ var f=document.getElementById('form_transfers'); if(!f) return; f.onsubmit=function(e){ e.preventDefault(); var fromId=Number(f.elements.fromId.value), toId=Number(f.elements.toId.value), value=Number(f.elements.value.value||0); if(!fromId||!toId||fromId===toId) return alert('Escolha contas diferentes.'); state.transfers.push({id:nextId(state.transfers),fromId:fromId,toId:toId,date:f.elements.date.value,value:value}); state.finance.push({id:nextId(state.finance),type:'saida',category:'transferência',partyName:accountName(toId),accountId:fromId,date:f.elements.date.value,value:value,origin:'transferencia'}); state.finance.push({id:nextId(state.finance),type:'entrada',category:'transferência',partyName:accountName(fromId),accountId:toId,date:f.elements.date.value,value:value,origin:'transferencia'}); save(); render(); } }
+
+  function bindCheques(){
+    var antBtns=document.querySelectorAll('.action-border');
+    for(var i=0;i<antBtns.length;i++) antBtns[i].onclick=function(){
+      var rid=Number(this.getAttribute('data-receivable-id')||0);
+      uiState.borderSelectedIds = rid?[rid]:[];
+      uiState.borderQuickSelectIds = rid?[rid]:[];
+      render(); setPage('borders');
+    };
+    var retBtns=document.querySelectorAll('.action-return');
+    for(var j=0;j<retBtns.length;j++) retBtns[j].onclick=async function(){
+      var rid=Number(this.getAttribute('data-receivable-id')||0);
+      if(!rid) return alert('Não encontrei o título vinculado a este cheque.');
+      if(!confirm('Confirmar devolução deste título antecipado?')) return;
+      try{
+        await apiPost('/contas-receber/'+rid+'/devolver', { date: today(), obs:'Devolvido pelo submenu de cheques' });
+        await syncRemoteCadastros();
+        render(); setPage('cheques');
+      }catch(err){ alert(err.message||'Erro ao devolver cheque.'); }
+    };
+  }
+
+  function bindBorders(){
+    var checks=document.querySelectorAll('.border-title');
+    for(var i=0;i<checks.length;i++) checks[i].onchange=function(){
+      var id=Number(this.value||0), arr=(uiState.borderSelectedIds||[]).slice();
+      if(this.checked){
+        if(arr.indexOf(id)<0) arr.push(id);
+      } else {
+        arr=arr.filter(function(x){ return Number(x)!==id; });
+      }
+      uiState.borderSelectedIds=arr;
+      render(); setPage('borders');
+    };
+    var markAll=document.getElementById('borderSelectAll');
+    if(markAll) markAll.onchange=function(){
+      if(this.checked) uiState.borderSelectedIds = borderEligibleReceivables().map(function(r){ return Number(r.id); });
+      else uiState.borderSelectedIds = [];
+      render(); setPage('borders');
+    };
+    var f=document.getElementById('form_borders');
+    if(!f) return;
+    var recalc=function(){
+      var bruto=borderSelectedReceivables().reduce(function(s,r){ return s + Number(r.openValue||0); },0);
+      var liquido=Number(f.elements.net.value||0);
+      f.elements.gross.value = bruto.toFixed(2);
+      f.elements.qtyTitles.value = String(borderSelectedReceivables().length);
+      f.elements.fee.value = Math.max(0, bruto-liquido).toFixed(2);
+      if(markAll){
+        var all=borderEligibleReceivables();
+        markAll.checked = !!all.length && borderSelectedReceivables().length===all.length;
+      }
+    };
+    if(f.elements.net) f.elements.net.oninput=recalc;
+    recalc();
+    f.onsubmit=async function(e){
+      e.preventDefault();
+      var selected=borderSelectedReceivables();
+      var accountId=Number(f.elements.accountId.value||0);
+      var institutionId=Number(f.elements.institutionId.value||0);
+      var institution=(byId(state.institutions,institutionId)||{}).name||'';
+      var net=Number(f.elements.net.value||0);
+      var gross=selected.reduce(function(s,r){ return s + Number(r.openValue||0); },0);
+      if(!selected.length) return alert('Selecione ao menos um título.');
+      if(!accountId) return alert('Escolha a conta de entrada.');
+      if(net<=0) return alert('Informe o valor líquido.');
+      if(net>gross) return alert('O valor líquido não pode ser maior que o bruto.');
+      try{
+        await apiPost('/antecipacoes', {
+          codigo: nextCode('BOR', state.borders),
+          bordero: f.elements.bordero.value||'',
+          date: f.elements.date.value||today(),
+          institution: institution,
+          accountId: accountId,
+          net: net,
+          obs: f.elements.obs.value||'',
+          receivableIds: selected.map(function(r){ return Number(r.id); })
+        });
+        uiState.borderSelectedIds=[];
+        uiState.borderQuickSelectIds=[];
+        await syncRemoteCadastros();
+        alert('Antecipação salva com sucesso.');
+        render(); setPage('borders');
+      }catch(err){ alert(err.message||'Erro ao salvar antecipação.'); }
+    };
+  }
 
   function bindFinance(){
     var f=document.getElementById('form_finance');
