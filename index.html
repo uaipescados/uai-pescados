@@ -420,7 +420,7 @@
       }
       rows+='<tr><td>'+(c.code||'')+'</td><td>'+c.number+'</td><td>'+customerName(c.customerId)+'</td><td>'+(c.emitter||'')+'</td><td>'+(c.bank||'')+'</td><td>'+money(c.value)+'</td><td>'+(c.dueDate||'')+'</td><td><span class="pill">'+c.status+'</span></td><td class="list-actions">'+
       ((c.status==='em carteira' && linkedRec)?'<button type="button" class="btn secondary action-border" data-receivable-id="'+linkedRec.id+'" data-id="'+c.id+'">Antecipar</button>':'')+
-      (((c.status==='antecipado') || (c.status==='devolvido')) && linkedRec?'<button type="button" class="btn danger action-return" data-receivable-id="'+linkedRec.id+'" data-id="'+c.id+'">Devolvido</button>':'')+
+      ((c.status==='antecipado' && linkedRec)?'<button type="button" class="btn danger action-return" data-receivable-id="'+linkedRec.id+'" data-id="'+c.id+'">Devolvido</button>':'')+
       '</td></tr>';
     });
     return '<div class="card"><h3>Cheques</h3><table><thead><tr><th>Código</th><th>Número</th><th>Cliente</th><th>Emitente</th><th>Banco</th><th>Valor</th><th>Venc.</th><th>Status</th><th>Ações</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
