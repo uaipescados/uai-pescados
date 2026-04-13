@@ -109,8 +109,10 @@
   async function apiPost(path, body){ var r=await fetch(API_BASE+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); var j=await r.json(); if(!r.ok) throw new Error(j.error||('Erro ao salvar '+path)); return j; }
   async function syncRemoteCadastros(){
     try{
-      var remote = await Promise.all([apiGet('/clientes'), apiGet('/fornecedores'), apiGet('/produtos'), apiGet('/vendas'), apiGet('/cheques')]);
-      var customers=remote[0], suppliers=remote[1], products=remote[2], sales=remote[3], cheques=remote[4];
+      var remote = await Promise.all([
+        apiGet('/clientes'), apiGet('/fornecedores'), apiGet('/produtos'), apiGet('/vendas'), apiGet('/cheques'), apiGet('/financeiro'), apiGet('/contas-receber')
+      ]);
+      var customers=remote[0], suppliers=remote[1], products=remote[2], sales=remote[3], cheques=remote[4], finance=remote[5], receivables=remote[6];
       state.customers = customers.map(function(x){ return {id:x.id, code:x.codigo||'', name:x.nome||'', phone:x.telefone||'', city:x.cidade||'', creditLimit:Number(x.limite_credito||0)||0, observacoes:x.observacoes||''}; });
       state.suppliers = suppliers.map(function(x){ return {id:x.id, code:x.codigo||'', name:x.nome||'', type:x.tipo||'', phone:x.telefone||'', city:x.cidade||'', observacoes:x.observacoes||''}; });
       var localProductMap={};
@@ -120,6 +122,8 @@
         return { id:x.id, code:x.codigo||'', customerId:Number(x.cliente_id||0), date:x.data_venda||'', total:Number(x.valor_total||0), openAmount:Number(x.valor_aberto||0), obs:x.observacoes||'', items:(x.itens||[]).map(function(i){ return { productId:Number(i.produto_id||0), qty:Number(i.quantidade_kg||0), unitPrice:Number(i.valor_unitario||0), total:Number(i.valor_total||0) }; }), payments:(x.pagamentos||[]).map(function(p){ return { type:p.tipo_pagamento||'', value:Number(p.valor||0), accountId:Number(p.conta_id||0)||'', dueDate:p.data_prevista||'', obs:p.observacoes||'' }; }) };
       });
       state.cheques = cheques.map(function(c){ return { id:c.id, code:c.codigo||'', saleId:Number(c.venda_id||0), customerId:Number(c.cliente_id||0), number:c.numero_cheque||'', bank:c.banco||'', emitter:c.emitente_nome||'', value:Number(c.valor||0), dueDate:c.data_vencimento||'', status:c.status||'em carteira' }; });
+      state.finance = finance.map(function(f){ return { id:f.id, code:f.codigo||'', type:f.tipo||'', category:f.categoria||'', partyName:f.favorecido||'', accountId:Number(f.conta_id||0)||'', date:f.data_lancamento||'', value:Number(f.valor||0), origin:f.origem||'', obs:f.observacoes||'' }; });
+      state.receivables = receivables.map(function(r){ return { id:r.id, code:r.codigo||'', customerId:Number(r.cliente_id||0)||'', partyName:r.nome_cliente||'', category:r.categoria||'', originalValue:Number(r.valor_original||0), openValue:Number(r.valor_aberto||0), date:r.data_vencimento||r.data_lancamento||'', status:r.status||'aberto', origin:r.origem||'', accountId:Number(r.conta_id||0)||'', obs:r.observacoes||'' }; });
       save();
     }catch(err){ console.error(err); }
   }
@@ -468,12 +472,7 @@
     bindCadastro('suppliers',['name','type','phone','city']);
     bindCadastro('employees',['name','role','phone','salary']);
     bindCadastro('institutions',['name','type','phone','obs']);
-    bindProducts(); 
-    bindSales(); 
-    //bindCheques(); 
-    bindBorders(); 
-    bindFinance(); 
-    bindLots(); bindProduction(); bindPurchases(); bindTransfers(); bindReceivables(); bindPayables(); bindDeletes();
+    bindProducts(); bindSales(); bindCheques(); bindBorders(); bindFinance(); bindLots(); bindProduction(); bindPurchases(); bindTransfers(); bindReceivables(); bindPayables(); bindDeletes();
   }
   function bindCadastro(key,fields){
     var f=document.getElementById('form_'+key); if(!f) return; f.onsubmit=async function(e){ e.preventDefault();
@@ -526,14 +525,6 @@
           var it=data.items[a], prod=byId(state.products,it.productId);
           if(prod){ prod.stock=Math.max(0, Number(prod.stock||0)-Number(it.qty||0)); }
           state.stockMoves.push({id:nextId(state.stockMoves),productId:it.productId,type:'saida',origin:'venda',qty:it.qty,cost:it.unitPrice,date:f.elements.date.value});
-        }
-        for(var b=0;b<data.payments.length;b++){
-          var p=data.payments[b];
-          if((p.type==='dinheiro' || p.type==='pix' || p.type==='cartao') && p.accountId){
-            state.finance.push({id:nextId(state.finance),type:'entrada',category:'venda',partyName:customerName(customerId),accountId:Number(p.accountId),date:f.elements.date.value,value:Number(p.value||0),origin:'venda'});
-          } else if(p.type==='boleto'){
-            state.receivables.push({id:nextId(state.receivables), code: nextCode('REC', state.receivables), customerId:customerId, partyName:customerName(customerId), category:'boleto venda', originalValue:Number(p.value||0), openValue:Number(p.value||0), date:p.dueDate||f.elements.date.value, status:'aberto', origin:'venda'});
-          }
         }
         uiState.saleDraft=null;
         await syncRemoteCadastros();
@@ -598,43 +589,62 @@
   }
   function bindTransfers(){ var f=document.getElementById('form_transfers'); if(!f) return; f.onsubmit=function(e){ e.preventDefault(); var fromId=Number(f.elements.fromId.value), toId=Number(f.elements.toId.value), value=Number(f.elements.value.value||0); if(!fromId||!toId||fromId===toId) return alert('Escolha contas diferentes.'); state.transfers.push({id:nextId(state.transfers),fromId:fromId,toId:toId,date:f.elements.date.value,value:value}); state.finance.push({id:nextId(state.finance),type:'saida',category:'transferência',partyName:accountName(toId),accountId:fromId,date:f.elements.date.value,value:value,origin:'transferencia'}); state.finance.push({id:nextId(state.finance),type:'entrada',category:'transferência',partyName:accountName(fromId),accountId:toId,date:f.elements.date.value,value:value,origin:'transferencia'}); save(); render(); } }
 
+  function bindFinance(){
+    var f=document.getElementById('form_finance');
+    if(!f) return;
+    f.onsubmit=async function(e){
+      e.preventDefault();
+      var value=Number(f.elements.value.value||0), accountId=Number(f.elements.accountId.value||0);
+      if(value<=0) return alert('Informe o valor.');
+      try{
+        await apiPost('/financeiro',{ codigo: nextCode('FIN', state.finance), tipo:f.elements.type.value, categoria:f.elements.category.value||'manual', favorecido:f.elements.partyName.value||'', contaId:accountId||null, valor:value, data:f.elements.date.value, origem:'manual', observacoes:'' });
+        f.reset();
+        f.elements.date.value=today();
+        await syncRemoteCadastros();
+        render(); setPage('finance');
+      }catch(err){ alert(err.message||'Erro ao salvar lançamento.'); }
+    };
+  }
+
   function bindReceivables(){
     var f=document.getElementById('form_receivables');
-    if(f) f.onsubmit=function(e){
+    if(f) f.onsubmit=async function(e){
       e.preventDefault();
       var customerId=Number(f.elements.customerId.value||0), value=Number(f.elements.value.value||0), accountId=Number(f.elements.accountId.value||0);
       if(!customerId) return alert('Selecione o cliente.');
       if(value<=0) return alert('Informe o valor.');
       var receiveNow=f.elements.receiveNow.value==='sim';
-      var rec={id:nextId(state.receivables), code: nextCode('REC', state.receivables), customerId:customerId, partyName:customerName(customerId), category:f.elements.category.value||'manual', originalValue:value, openValue: receiveNow?0:value, date:f.elements.dueDate.value||f.elements.date.value, status: receiveNow?'recebido':'aberto', origin:'manual', accountId: receiveNow?accountId:null, obs:f.elements.obs.value};
-      state.receivables.push(rec);
-      if(receiveNow){
-        if(!accountId) return alert('Escolha a conta de entrada.');
-        state.finance.push({id:nextId(state.finance),type:'entrada',category:rec.category,partyName:rec.partyName,accountId:accountId,date:f.elements.date.value,value:value,origin:'recebimento_manual'});
-      }
-      uiState.receivableSettleId=null;
-      save(); render(); setPage('receivables');
+      try{
+        await apiPost('/contas-receber', { codigo: nextCode('REC', state.receivables), customerId:customerId, category:f.elements.category.value||'manual', value:value, date:f.elements.date.value, dueDate:f.elements.dueDate.value||f.elements.date.value, receiveNow:receiveNow, accountId:receiveNow?(accountId||null):null, obs:f.elements.obs.value||'' });
+        uiState.receivableSettleId=null;
+        f.reset();
+        f.elements.date.value=today();
+        f.elements.dueDate.value=today();
+        await syncRemoteCadastros();
+        save(); render(); setPage('receivables');
+      }catch(err){ alert(err.message||'Erro ao salvar conta a receber.'); }
     };
     var receiveBtns=document.querySelectorAll('.receive-receivable');
     for(var i=0;i<receiveBtns.length;i++) receiveBtns[i].onclick=function(){ uiState.receivableSettleId=Number(this.getAttribute('data-id')); render(); setPage('receivables'); };
     var settleForm=document.getElementById('form_receive_receivable');
-    if(settleForm) settleForm.onsubmit=function(e){
+    if(settleForm) settleForm.onsubmit=async function(e){
       e.preventDefault();
-      var rec=byId(state.receivables, Number(settleForm.elements.receivableId.value||0));
-      if(!rec) return;
+      var receivableId=Number(settleForm.elements.receivableId.value||0);
       var value=Number(settleForm.elements.value.value||0), accountId=Number(settleForm.elements.accountId.value||0), date=settleForm.elements.date.value||today();
+      if(!receivableId) return;
       if(value<=0) return alert('Informe o valor recebido.');
-      if(value>Number(rec.openValue||0)) return alert('O valor não pode ser maior que o em aberto.');
       if(!accountId) return alert('Escolha a conta de entrada.');
-      state.finance.push({id:nextId(state.finance),type:'entrada',category:rec.category||'conta a receber',partyName:rec.partyName||customerName(rec.customerId),accountId:accountId,date:date,value:value,origin:'conta_receber',obs:settleForm.elements.obs.value||''});
-      rec.openValue = Number((Number(rec.openValue||0)-value).toFixed(2));
-      rec.status = rec.openValue<=0 ? 'recebido' : 'parcial';
-      uiState.receivableSettleId=null;
-      save(); render(); setPage('receivables');
+      try{
+        await apiPost('/contas-receber/'+receivableId+'/receber', { value:value, accountId:accountId, date:date, obs:settleForm.elements.obs.value||'' });
+        uiState.receivableSettleId=null;
+        await syncRemoteCadastros();
+        save(); render(); setPage('receivables');
+      }catch(err){ alert(err.message||'Erro ao receber conta.'); }
     };
-    var cancel=document.getElementById('cancelReceiveReceivable');
-    if(cancel) cancel.onclick=function(){ uiState.receivableSettleId=null; render(); setPage('receivables'); };
+    var cancelBtn=document.getElementById('cancelReceiveReceivable');
+    if(cancelBtn) cancelBtn.onclick=function(){ uiState.receivableSettleId=null; render(); setPage('receivables'); };
   }
+
   function bindPayables(){
     var f=document.getElementById('form_payables');
     if(f){
