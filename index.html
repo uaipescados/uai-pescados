@@ -87,7 +87,7 @@
     {id:'financeiro', title:'Financeiro', items:[['finance','Lançamentos'],['receivables','Contas a Receber'],['payables','Contas a Pagar'],['transfers','Transferências']]}
   ];
   var menuOpenState={principal:true,cadastros:false,producao:false,financeiro:false};
-  var uiState={receivableSettleId:null,payableSettleId:null};
+  var uiState={receivableSettleId:null,payableSettleId:null,editingCustomerId:null,editingSupplierId:null,editingEmployeeId:null,editingInstitutionId:null,editingProductId:null};
 
   // garante códigos nos cadastros antigos
   (function ensureCodes(){
@@ -107,6 +107,7 @@
   var API_BASE='https://uai-pescados-backend.onrender.com';
   async function apiGet(path){ var r=await fetch(API_BASE+path); if(!r.ok) throw new Error('Erro ao carregar '+path); return await r.json(); }
   async function apiPost(path, body){ var r=await fetch(API_BASE+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); var j=await r.json(); if(!r.ok) throw new Error(j.error||('Erro ao salvar '+path)); return j; }
+  async function apiPut(path, body){ var r=await fetch(API_BASE+path,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); var j=await r.json(); if(!r.ok) throw new Error(j.error||('Erro ao salvar '+path)); return j; }
   async function syncRemoteCadastros(){
     try{
       var remote = await Promise.all([
@@ -135,6 +136,10 @@
   function supplierName(id){ var s=byId(state.suppliers,id); return s?s.name:''; }
   function productName(id){ var p=byId(state.products,id); return p?p.name:''; }
   function institutionName(id){ var x=byId(state.institutions,id); return x?x.name:''; }
+  function startReceiveReceivable(id){ uiState.receivableSettleId=Number(id); setPage('receivables'); }
+  function startEditCadastro(kind,id){ var key='editing'+kind.charAt(0).toUpperCase()+kind.slice(1)+'Id'; uiState[key]=Number(id); setPage(kind==='product'?'products':kind+'s'); }
+  function clearEditCadastro(kind){ var key='editing'+kind.charAt(0).toUpperCase()+kind.slice(1)+'Id'; uiState[key]=null; setPage(kind==='product'?'products':kind+'s'); }
+  function changeSalePayType(idx,val){ var d=saleDraft().payments[idx]||{}; d.type=val; saleDraft().payments[idx]=d; setPage('sales'); }
   function recalcProductPurchaseMetrics(productId){
     var prod=byId(state.products,productId); if(!prod) return;
     var qtyTotal=0, valueTotal=0, latest=null;
@@ -239,34 +244,33 @@
   }
 
   function renderCustomers(){
-    return simpleCadastro('Clientes','customers',
-      [{label:'Nome',name:'name'},{label:'Telefone',name:'phone'},{label:'Cidade',name:'city'},{label:'Limite de crédito',name:'creditLimit'}],
-      function(item){ if(item==='head') return '<th>Código</th><th>Nome</th><th>Telefone</th><th>Cidade</th><th>Limite</th>'; return '<tr><td>'+(item.code||'')+'</td><td>'+item.name+'</td><td>'+(item.phone||'')+'</td><td>'+(item.city||'')+'</td><td>'+(item.creditLimit?money(item.creditLimit):'<span class="pill">Sem limite</span>')+'</td></tr>'; }
-    );
+    var editing=uiState.editingCustomerId?byId(state.customers, uiState.editingCustomerId):null;
+    var rows='';
+    state.customers.forEach(function(item){ rows+='<tr><td>'+(item.code||'')+'</td><td>'+item.name+'</td><td>'+(item.phone||'')+'</td><td>'+(item.city||'')+'</td><td>'+(item.creditLimit?money(item.creditLimit):'<span class="pill">Sem limite</span>')+'</td><td><button type="button" class="btn secondary" onclick="startEditCadastro(\'customer\','+item.id+')">Editar</button></td></tr>'; });
+    return '<div class="grid two"><div class="card"><h3>'+(editing?'Editar Cliente':'Novo Cliente')+'</h3><form id="form_customers"><div class="row-2"><div><label>Nome</label><input name="name" value="'+(editing?editing.name:'')+'" /></div><div><label>Telefone</label><input name="phone" value="'+(editing?(editing.phone||''):'')+'" /></div><div><label>Cidade</label><input name="city" value="'+(editing?(editing.city||''):'')+'" /></div><div><label>Limite de crédito</label><input name="creditLimit" value="'+(editing?(editing.creditLimit||''):'')+'" /></div></div><div class="toolbar" style="margin-top:12px"><button type="submit" class="btn">'+(editing?'Salvar alteração':'Salvar')+'</button>'+(editing?'<button type="button" class="btn secondary" onclick="clearEditCadastro(\'customer\')">Cancelar</button>':'')+'</div></form></div><div class="card"><h3>Clientes</h3><table><thead><tr><th>Código</th><th>Nome</th><th>Telefone</th><th>Cidade</th><th>Limite</th><th>Ações</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
   }
   function renderSuppliers(){
-    return simpleCadastro('Fornecedores','suppliers',
-      [{label:'Nome',name:'name'},{label:'Tipo',name:'type'},{label:'Telefone',name:'phone'},{label:'Cidade',name:'city'}],
-      function(item){ if(item==='head') return '<th>Código</th><th>Nome</th><th>Tipo</th><th>Telefone</th><th>Cidade</th>'; return '<tr><td>'+(item.code||'')+'</td><td>'+item.name+'</td><td>'+(item.type||'')+'</td><td>'+(item.phone||'')+'</td><td>'+(item.city||'')+'</td></tr>'; }
-    );
+    var editing=uiState.editingSupplierId?byId(state.suppliers, uiState.editingSupplierId):null;
+    var rows='';
+    state.suppliers.forEach(function(item){ rows+='<tr><td>'+(item.code||'')+'</td><td>'+item.name+'</td><td>'+(item.type||'')+'</td><td>'+(item.phone||'')+'</td><td>'+(item.city||'')+'</td><td><button type="button" class="btn secondary" onclick="startEditCadastro(\'supplier\','+item.id+')">Editar</button></td></tr>'; });
+    return '<div class="grid two"><div class="card"><h3>'+(editing?'Editar Fornecedor':'Novo Fornecedor')+'</h3><form id="form_suppliers"><div class="row-2"><div><label>Nome</label><input name="name" value="'+(editing?editing.name:'')+'" /></div><div><label>Tipo</label><input name="type" value="'+(editing?(editing.type||''):'')+'" /></div><div><label>Telefone</label><input name="phone" value="'+(editing?(editing.phone||''):'')+'" /></div><div><label>Cidade</label><input name="city" value="'+(editing?(editing.city||''):'')+'" /></div></div><div class="toolbar" style="margin-top:12px"><button type="submit" class="btn">'+(editing?'Salvar alteração':'Salvar')+'</button>'+(editing?'<button type="button" class="btn secondary" onclick="clearEditCadastro(\'supplier\')">Cancelar</button>':'')+'</div></form></div><div class="card"><h3>Fornecedores</h3><table><thead><tr><th>Código</th><th>Nome</th><th>Tipo</th><th>Telefone</th><th>Cidade</th><th>Ações</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
   }
   function renderEmployees(){
-    return simpleCadastro('Funcionários','employees',
-      [{label:'Nome',name:'name'},{label:'Cargo',name:'role'},{label:'Telefone',name:'phone'},{label:'Salário base',name:'salary'}],
-      function(item){ if(item==='head') return '<th>Código</th><th>Nome</th><th>Cargo</th><th>Telefone</th><th>Salário</th>'; return '<tr><td>'+(item.code||'')+'</td><td>'+item.name+'</td><td>'+(item.role||'')+'</td><td>'+(item.phone||'')+'</td><td>'+money(item.salary||0)+'</td></tr>'; }
-    );
+    var editing=uiState.editingEmployeeId?byId(state.employees, uiState.editingEmployeeId):null;
+    var rows=''; state.employees.forEach(function(item){ rows+='<tr><td>'+(item.code||'')+'</td><td>'+item.name+'</td><td>'+(item.role||'')+'</td><td>'+(item.phone||'')+'</td><td>'+money(item.salary||0)+'</td><td><button type="button" class="btn secondary" onclick="startEditCadastro(\'employee\','+item.id+')">Editar</button></td></tr>'; });
+    return '<div class="grid two"><div class="card"><h3>'+(editing?'Editar Funcionário':'Novo Funcionário')+'</h3><form id="form_employees"><div class="row-2"><div><label>Nome</label><input name="name" value="'+(editing?editing.name:'')+'" /></div><div><label>Cargo</label><input name="role" value="'+(editing?(editing.role||''):'')+'" /></div><div><label>Telefone</label><input name="phone" value="'+(editing?(editing.phone||''):'')+'" /></div><div><label>Salário base</label><input name="salary" value="'+(editing?(editing.salary||''):'')+'" /></div></div><div class="toolbar" style="margin-top:12px"><button type="submit" class="btn">'+(editing?'Salvar alteração':'Salvar')+'</button>'+(editing?'<button type="button" class="btn secondary" onclick="clearEditCadastro(\'employee\')">Cancelar</button>':'')+'</div></form></div><div class="card"><h3>Funcionários</h3><table><thead><tr><th>Código</th><th>Nome</th><th>Cargo</th><th>Telefone</th><th>Salário</th><th>Ações</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
   }
   function renderInstitutions(){
-    return simpleCadastro('Instituições','institutions',
-      [{label:'Nome',name:'name'},{label:'Tipo',name:'type'},{label:'Telefone',name:'phone'},{label:'Observação',name:'obs'}],
-      function(item){ if(item==='head') return '<th>Código</th><th>Nome</th><th>Tipo</th><th>Telefone</th><th>Obs.</th>'; return '<tr><td>'+(item.code||'')+'</td><td>'+item.name+'</td><td>'+(item.type||'')+'</td><td>'+(item.phone||'')+'</td><td>'+(item.obs||'')+'</td></tr>'; }
-    );
+    var editing=uiState.editingInstitutionId?byId(state.institutions, uiState.editingInstitutionId):null;
+    var rows=''; state.institutions.forEach(function(item){ rows+='<tr><td>'+(item.code||'')+'</td><td>'+item.name+'</td><td>'+(item.type||'')+'</td><td>'+(item.phone||'')+'</td><td>'+(item.obs||'')+'</td><td><button type="button" class="btn secondary" onclick="startEditCadastro(\'institution\','+item.id+')">Editar</button></td></tr>'; });
+    return '<div class="grid two"><div class="card"><h3>'+(editing?'Editar Instituição':'Nova Instituição')+'</h3><form id="form_institutions"><div class="row-2"><div><label>Nome</label><input name="name" value="'+(editing?editing.name:'')+'" /></div><div><label>Tipo</label><input name="type" value="'+(editing?(editing.type||''):'')+'" /></div><div><label>Telefone</label><input name="phone" value="'+(editing?(editing.phone||''):'')+'" /></div><div><label>Observação</label><input name="obs" value="'+(editing?(editing.obs||''):'')+'" /></div></div><div class="toolbar" style="margin-top:12px"><button type="submit" class="btn">'+(editing?'Salvar alteração':'Salvar')+'</button>'+(editing?'<button type="button" class="btn secondary" onclick="clearEditCadastro(\'institution\')">Cancelar</button>':'')+'</div></form></div><div class="card"><h3>Instituições</h3><table><thead><tr><th>Código</th><th>Nome</th><th>Tipo</th><th>Telefone</th><th>Obs.</th><th>Ações</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
   }
   function renderProducts(){
     var options='<option value="produção própria">produção própria</option><option value="revenda">revenda</option>';
+    var editing=uiState.editingProductId?byId(state.products, uiState.editingProductId):null;
     var rows='';
-    state.products.forEach(function(p){ rows+='<tr><td>'+(p.code||'')+'</td><td>'+p.name+'</td><td>'+p.type+'</td><td>'+Number(p.stock||0).toFixed(2)+' kg</td><td>'+money(p.cost||0)+'</td><td>'+money(p.salePrice||0)+'</td><td>'+money(p.avgCost||0)+'</td></tr>'; });
-    return '<div class="grid two"><div class="card"><h3>Novo produto</h3><form id="form_products"><label>Nome</label><input name="name" /><div class="row-3"><div><label>Tipo</label><select name="type">'+options+'</select></div><div><label>Preço de venda</label><input name="salePrice" type="number" step="0.01" value="0" /></div><div><label>Custo inicial</label><input name="cost" type="number" step="0.01" value="0" /></div></div><div class="toolbar" style="margin-top:12px"><button type="submit" class="btn">Salvar</button></div></form></div><div class="card"><h3>Produtos</h3><table><thead><tr><th>Código</th><th>Nome</th><th>Tipo</th><th>Estoque</th><th>Preço custo</th><th>Preço venda</th><th>Preço médio</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+    state.products.forEach(function(p){ rows+='<tr><td>'+(p.code||'')+'</td><td>'+p.name+'</td><td>'+p.type+'</td><td>'+Number(p.stock||0).toFixed(2)+' kg</td><td>'+money(p.cost||0)+'</td><td>'+money(p.salePrice||0)+'</td><td>'+money(p.avgCost||0)+'</td><td><button type="button" class="btn secondary" onclick="startEditCadastro(\'product\','+p.id+')">Editar</button></td></tr>'; });
+    return '<div class="grid two"><div class="card"><h3>'+(editing?'Editar Produto':'Novo produto')+'</h3><form id="form_products"><label>Nome</label><input name="name" value="'+(editing?editing.name:'')+'" /><div class="row-3"><div><label>Tipo</label><select name="type">'+options+'</select></div><div><label>Preço de venda</label><input name="salePrice" type="number" step="0.01" value="'+(editing?(editing.salePrice||0):0)+'" /></div><div><label>Custo inicial</label><input name="cost" type="number" step="0.01" value="'+(editing?(editing.cost||0):0)+'" /></div></div><div class="toolbar" style="margin-top:12px"><button type="submit" class="btn">'+(editing?'Salvar alteração':'Salvar')+'</button>'+(editing?'<button type="button" class="btn secondary" onclick="clearEditCadastro(\'product\')">Cancelar</button>':'')+'</div></form></div><div class="card"><h3>Produtos</h3><table><thead><tr><th>Código</th><th>Nome</th><th>Tipo</th><th>Estoque</th><th>Preço custo</th><th>Preço venda</th><th>Preço médio</th><th>Ações</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
   }
 
   function renderPurchases(){
@@ -444,7 +448,7 @@
         settleCard = '<div class="card"><h3>Receber conta</h3><form id="form_receive_receivable"><div class="warning" style="margin-bottom:10px">'+(sr.code||'')+' - '+(sr.partyName||customerName(sr.customerId)||'Cliente')+' | Em aberto: '+money(sr.openValue||0)+'</div><input type="hidden" name="receivableId" value="'+sr.id+'" /><div class="row-2"><div><label>Valor recebido</label><input type="number" step="0.01" name="value" value="'+Number(sr.openValue||0).toFixed(2)+'" /></div><div><label>Conta de entrada</label><select name="accountId">'+accOpts+'</select></div><div><label>Data</label><input type="date" name="date" value="'+today()+'" /></div><div><label>Observação</label><input name="obs" placeholder="Opcional" /></div></div><div class="toolbar" style="margin-top:12px"><button type="submit" class="btn">Confirmar recebimento</button><button type="button" class="btn secondary" id="cancelReceiveReceivable">Cancelar</button></div></form></div>';
       }
     }
-    var rows=''; state.receivables.slice().reverse().forEach(function(r){ rows+='<tr><td>'+(r.code||'')+'</td><td>'+(r.partyName||customerName(r.customerId))+'</td><td>'+(r.category||r.origin||'')+'</td><td>'+money(r.originalValue)+'</td><td>'+money(r.openValue)+'</td><td>'+(r.date||'')+'</td><td>'+r.status+'</td><td>'+(Number(r.openValue||0)>0?'<button type="button" class="btn secondary receive-receivable" data-id="'+r.id+'">Receber</button>':'')+'</td></tr>'; });
+    var rows=''; state.receivables.slice().reverse().forEach(function(r){ rows+='<tr><td>'+(r.code||'')+'</td><td>'+(r.partyName||customerName(r.customerId))+'</td><td>'+(r.category||r.origin||'')+'</td><td>'+money(r.originalValue)+'</td><td>'+money(r.openValue)+'</td><td>'+(r.date||'')+'</td><td>'+r.status+'</td><td>'+(Number(r.openValue||0)>0?'<button type="button" class="btn secondary" onclick="startReceiveReceivable('+r.id+')">Receber</button>':'')+'</td></tr>'; });
     return '<div class="grid two"><div class="card"><h3>Lançamento manual - Contas a Receber</h3><form id="form_receivables"><div class="row-2"><div><label>Cliente</label><select name="customerId">'+customerOpts+'</select></div><div><label>Categoria</label><input name="category" placeholder="Ex: aluguel a receber" /></div><div><label>Data</label><input type="date" name="date" value="'+today()+'" /></div><div><label>Vencimento</label><input type="date" name="dueDate" value="'+today()+'" /></div><div><label>Valor</label><input type="number" step="0.01" name="value" /></div><div><label>Receber agora?</label><select name="receiveNow"><option value="nao">Não</option><option value="sim">Sim</option></select></div><div><label>Conta de entrada</label><select name="accountId">'+accOpts+'</select></div><div><label>Observação</label><input name="obs" /></div></div><div class="toolbar" style="margin-top:12px"><button type="submit" class="btn">Salvar conta a receber</button></div></form></div><div class="card"><h3>Contas a Receber</h3>'+settleCard+'<table><thead><tr><th>Código</th><th>Cliente</th><th>Categoria</th><th>Valor original</th><th>Em aberto</th><th>Data</th><th>Status</th><th>Ações</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
   }
   function renderPayables(){
@@ -479,24 +483,22 @@
       var prefixes={customers:'CLI',suppliers:'FOR',employees:'FUN',institutions:'INS'};
       if(key==='customers'){
         try{
-          await apiPost('/clientes',{ codigo: nextCode('CLI', state.customers), nome:f.elements.name.value, telefone:f.elements.phone.value, cidade:f.elements.city.value, limite_credito:Number(f.elements.creditLimit.value||0)||null, observacoes:f.elements.obs?f.elements.obs.value:'' });
-          f.reset(); await syncRemoteCadastros(); current='customers';
+          if(uiState.editingCustomerId){ await apiPut('/clientes/'+uiState.editingCustomerId,{ nome:f.elements.name.value, telefone:f.elements.phone.value, cidade:f.elements.city.value, limite_credito:Number(f.elements.creditLimit.value||0)||null, observacoes:f.elements.obs?f.elements.obs.value:'' }); uiState.editingCustomerId=null; } else { await apiPost('/clientes',{ codigo: nextCode('CLI', state.customers), nome:f.elements.name.value, telefone:f.elements.phone.value, cidade:f.elements.city.value, limite_credito:Number(f.elements.creditLimit.value||0)||null, observacoes:f.elements.obs?f.elements.obs.value:'' }); }
+          f.reset(); await syncRemoteCadastros(); current='customers'; render(); setPage('customers');
         }catch(err){ alert(err.message||'Erro ao salvar cliente.'); }
         return;
       }
       if(key==='suppliers'){
         try{
-          await apiPost('/fornecedores',{ codigo: nextCode('FOR', state.suppliers), nome:f.elements.name.value, telefone:f.elements.phone.value, cidade:f.elements.city.value, tipo:f.elements.type?f.elements.type.value:'', observacoes:f.elements.obs?f.elements.obs.value:'' });
-          f.reset(); await syncRemoteCadastros(); current='suppliers';
+          if(uiState.editingSupplierId){ await apiPut('/fornecedores/'+uiState.editingSupplierId,{ nome:f.elements.name.value, telefone:f.elements.phone.value, cidade:f.elements.city.value, tipo:f.elements.type?f.elements.type.value:'', observacoes:f.elements.obs?f.elements.obs.value:'' }); uiState.editingSupplierId=null; } else { await apiPost('/fornecedores',{ codigo: nextCode('FOR', state.suppliers), nome:f.elements.name.value, telefone:f.elements.phone.value, cidade:f.elements.city.value, tipo:f.elements.type?f.elements.type.value:'', observacoes:f.elements.obs?f.elements.obs.value:'' }); }
+          f.reset(); await syncRemoteCadastros(); current='suppliers'; render(); setPage('suppliers');
         }catch(err){ alert(err.message||'Erro ao salvar fornecedor.'); }
         return;
       }
-      var item={id:nextId(state[key]), code: nextCode(prefixes[key]||'CAD', state[key])};
-      for(var i=0;i<fields.length;i++) item[fields[i]]=f.elements[fields[i]].value;
-      state[key].push(item); save(); render();
+      var editMap={employees:'editingEmployeeId',institutions:'editingInstitutionId'}; var ek=editMap[key]; if(ek && uiState[ek]){ var existing=byId(state[key], uiState[ek]); if(existing){ for(var i=0;i<fields.length;i++) existing[fields[i]]=f.elements[fields[i]].value; } uiState[ek]=null; } else { var item={id:nextId(state[key]), code: nextCode(prefixes[key]||'CAD', state[key])}; for(var i=0;i<fields.length;i++) item[fields[i]]=f.elements[fields[i]].value; state[key].push(item); } save(); render(); setPage(key);
     };
   }
-  function bindProducts(){ var f=document.getElementById('form_products'); if(!f) return; f.onsubmit=async function(e){e.preventDefault(); var cost=Number(f.elements.cost.value||0), salePrice=Number(f.elements.salePrice.value||0); try{ var code=nextCode('PRO',state.products); await apiPost('/produtos',{ codigo: code, nome:f.elements.name.value, tipo:f.elements.type.value, unidade:'kg' }); await syncRemoteCadastros(); var p=null; for(var i=0;i<state.products.length;i++){ if(state.products[i].code===code){ p=state.products[i]; break; } } if(p){ p.cost=cost; p.avgCost=cost; p.salePrice=salePrice; p.stock=Number(p.stock||0); p.purchaseQtyTotal=Number(p.purchaseQtyTotal||0); p.purchaseValueTotal=Number(p.purchaseValueTotal||0); } save(); render(); }catch(err){ alert(err.message||'Erro ao salvar produto.'); } }; }
+  function bindProducts(){ var f=document.getElementById('form_products'); if(!f) return; if(uiState.editingProductId){ var ep=byId(state.products, uiState.editingProductId); if(ep && f.elements.type) f.elements.type.value=ep.type||'revenda'; } f.onsubmit=async function(e){e.preventDefault(); var cost=Number(f.elements.cost.value||0), salePrice=Number(f.elements.salePrice.value||0); try{ if(uiState.editingProductId){ await apiPut('/produtos/'+uiState.editingProductId,{ nome:f.elements.name.value, tipo:f.elements.type.value, unidade:'kg' }); await syncRemoteCadastros(); var ex=byId(state.products, uiState.editingProductId); if(ex){ ex.cost=cost; ex.salePrice=salePrice; if(!ex.purchaseQtyTotal) ex.avgCost=cost; } uiState.editingProductId=null; } else { var code=nextCode('PRO',state.products); await apiPost('/produtos',{ codigo: code, nome:f.elements.name.value, tipo:f.elements.type.value, unidade:'kg' }); await syncRemoteCadastros(); var p=null; for(var i=0;i<state.products.length;i++){ if(state.products[i].code===code){ p=state.products[i]; break; } } if(p){ p.cost=cost; p.avgCost=cost; p.salePrice=salePrice; p.stock=Number(p.stock||0); p.purchaseQtyTotal=Number(p.purchaseQtyTotal||0); p.purchaseValueTotal=Number(p.purchaseValueTotal||0); } } save(); render(); setPage('products'); }catch(err){ alert(err.message||'Erro ao salvar produto.'); } }; }
 
   function bindSales(){
     var f=document.getElementById('form_sales');
