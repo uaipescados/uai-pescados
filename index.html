@@ -110,22 +110,25 @@
   async function apiPut(path, body){ var r=await fetch(API_BASE+path,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); var t=await r.text(); var j={}; try{ j=t?JSON.parse(t):{}; }catch(e){ if(!r.ok) throw new Error('Erro ao salvar '+path); return {}; } if(!r.ok) throw new Error(j.error||('Erro ao salvar '+path)); return j; }
   async function apiDelete(path){ var r=await fetch(API_BASE+path,{method:'DELETE'}); var j={}; try{ j=await r.json(); }catch(e){} if(!r.ok) throw new Error(j.error||('Erro ao excluir '+path)); return j; }
   async function syncRemoteCadastros(){
+    var defaults=[[],[],[],[],[],[],[],[],[],[],[],[],[]];
+    var tasks=[
+      apiGet('/clientes'),
+      apiGet('/fornecedores'),
+      apiGet('/produtos'),
+      apiGet('/vendas'),
+      apiGet('/cheques'),
+      apiGet('/financeiro'),
+      apiGet('/contas-receber'),
+      apiGet('/contas-pagar'),
+      apiGet('/compras'),
+      apiGet('/lotes'),
+      apiGet('/producoes'),
+      apiGet('/estoque-movimentos'),
+      apiGet('/antecipacoes')
+    ];
+    var settled = await Promise.allSettled(tasks);
+    var remote = settled.map(function(r,i){ return r.status==='fulfilled' ? r.value : defaults[i]; });
     try{
-      var remote = await Promise.all([
-        apiGet('/clientes'),
-        apiGet('/fornecedores'),
-        apiGet('/produtos'),
-        apiGet('/vendas'),
-        apiGet('/cheques'),
-        apiGet('/financeiro'),
-        apiGet('/contas-receber'),
-        apiGet('/contas-pagar'),
-        apiGet('/compras'),
-        apiGet('/lotes'),
-        apiGet('/producoes'),
-        apiGet('/estoque-movimentos'),
-        apiGet('/antecipacoes')
-      ]);
       var customers=remote[0], suppliers=remote[1], products=remote[2], sales=remote[3], cheques=remote[4], finance=remote[5], receivables=remote[6], payables=remote[7], purchases=remote[8], lots=remote[9], productions=remote[10], stockMoves=remote[11], borders=remote[12];
       state.customers = customers.map(function(x){ return {id:x.id, code:x.codigo||'', name:x.nome||'', phone:x.telefone||'', city:x.cidade||'', creditLimit:Number(x.limite_credito||0)||0, observacoes:x.observacoes||''}; });
       state.suppliers = suppliers.map(function(x){ return {id:x.id, code:x.codigo||'', name:x.nome||'', type:x.tipo||'', phone:x.telefone||'', city:x.cidade||'', observacoes:x.observacoes||''}; });
