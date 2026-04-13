@@ -184,6 +184,7 @@
   function productName(id){ var p=byId(state.products,id); return p?p.name:''; }
   function institutionName(id){ var x=byId(state.institutions,id); return x?x.name:''; }
   function startReceiveReceivable(id){ uiState.receivableSettleId=Number(id); setPage('receivables'); }
+  window.startReceiveReceivable = startReceiveReceivable;
   window.startEditCadastro = function startEditCadastro(kind,id){ var key='editing'+kind.charAt(0).toUpperCase()+kind.slice(1)+'Id'; uiState[key]=Number(id); setPage(kind==='product'?'products':kind+'s'); }
   window.clearEditCadastro = function clearEditCadastro(kind){ var key='editing'+kind.charAt(0).toUpperCase()+kind.slice(1)+'Id'; uiState[key]=null; setPage(kind==='product'?'products':kind+'s'); }
   window.deleteCadastro = async function deleteCadastro(kind,id){
