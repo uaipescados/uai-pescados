@@ -87,7 +87,7 @@
     {id:'financeiro', title:'Financeiro', items:[['finance','Lançamentos'],['receivables','Contas a Receber'],['payables','Contas a Pagar'],['transfers','Transferências']]}
   ];
   var menuOpenState={principal:true,cadastros:false,producao:false,financeiro:false};
-  var uiState={receivableSettleId:null,payableSettleId:null,editingCustomerId:null,editingSupplierId:null,editingEmployeeId:null,editingInstitutionId:null,editingProductId:null,borderSelectedIds:[],borderQuickSelectIds:[]};
+  var uiState={receivableSettleId:null,payableSettleId:null,editingCustomerId:null,editingSupplierId:null,editingEmployeeId:null,editingInstitutionId:null,editingProductId:null};
 
   // garante códigos nos cadastros antigos
   (function ensureCodes(){
@@ -108,24 +108,64 @@
   async function apiGet(path){ var r=await fetch(API_BASE+path); if(!r.ok) throw new Error('Erro ao carregar '+path); return await r.json(); }
   async function apiPost(path, body){ var r=await fetch(API_BASE+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); var j=await r.json(); if(!r.ok) throw new Error(j.error||('Erro ao salvar '+path)); return j; }
   async function apiPut(path, body){ var r=await fetch(API_BASE+path,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); var j=await r.json(); if(!r.ok) throw new Error(j.error||('Erro ao salvar '+path)); return j; }
+  async function apiDelete(path){ var r=await fetch(API_BASE+path,{method:'DELETE'}); var j={}; try{ j=await r.json(); }catch(e){} if(!r.ok) throw new Error(j.error||('Erro ao excluir '+path)); return j; }
   async function syncRemoteCadastros(){
     try{
       var remote = await Promise.all([
-        apiGet('/clientes'), apiGet('/fornecedores'), apiGet('/produtos'), apiGet('/vendas'), apiGet('/cheques'), apiGet('/financeiro'), apiGet('/contas-receber'), apiGet('/antecipacoes')
+        apiGet('/clientes'),
+        apiGet('/fornecedores'),
+        apiGet('/produtos'),
+        apiGet('/vendas'),
+        apiGet('/cheques'),
+        apiGet('/financeiro'),
+        apiGet('/contas-receber'),
+        apiGet('/contas-pagar'),
+        apiGet('/compras'),
+        apiGet('/lotes'),
+        apiGet('/producoes'),
+        apiGet('/estoque-movimentos')
       ]);
-      var customers=remote[0], suppliers=remote[1], products=remote[2], sales=remote[3], cheques=remote[4], finance=remote[5], receivables=remote[6], antecipacoes=remote[7];
+      var customers=remote[0], suppliers=remote[1], products=remote[2], sales=remote[3], cheques=remote[4], finance=remote[5], receivables=remote[6], payables=remote[7], purchases=remote[8], lots=remote[9], productions=remote[10], stockMoves=remote[11];
       state.customers = customers.map(function(x){ return {id:x.id, code:x.codigo||'', name:x.nome||'', phone:x.telefone||'', city:x.cidade||'', creditLimit:Number(x.limite_credito||0)||0, observacoes:x.observacoes||''}; });
       state.suppliers = suppliers.map(function(x){ return {id:x.id, code:x.codigo||'', name:x.nome||'', type:x.tipo||'', phone:x.telefone||'', city:x.cidade||'', observacoes:x.observacoes||''}; });
       var localProductMap={};
       for(var i=0;i<state.products.length;i++){ var lp=state.products[i]; localProductMap[lp.code||('ID'+lp.id)] = lp; }
-      state.products = products.map(function(x){ var code=x.codigo||('ID'+x.id); var local=localProductMap[code]||{}; return {id:x.id, code:code, name:x.nome||'', type:x.tipo||'revenda', unit:x.unidade||'kg', cost:Number(local.cost||0), avgCost:Number(local.avgCost||local.cost||0), salePrice:Number(local.salePrice||0), stock:Number(local.stock||0), purchaseQtyTotal:Number(local.purchaseQtyTotal||0), purchaseValueTotal:Number(local.purchaseValueTotal||0)}; });
+      state.products = products.map(function(x){ var code=x.codigo||('ID'+x.id); var local=localProductMap[code]||{}; return {id:x.id, code:code, name:x.nome||'', type:x.tipo||'revenda', unit:x.unidade||'kg', cost:Number(local.cost||0), avgCost:Number(local.avgCost||local.cost||0), salePrice:Number(local.salePrice||0), stock:0, purchaseQtyTotal:0, purchaseValueTotal:0}; });
       state.sales = sales.map(function(x){
         return { id:x.id, code:x.codigo||'', customerId:Number(x.cliente_id||0), date:x.data_venda||'', total:Number(x.valor_total||0), openAmount:Number(x.valor_aberto||0), obs:x.observacoes||'', items:(x.itens||[]).map(function(i){ return { productId:Number(i.produto_id||0), qty:Number(i.quantidade_kg||0), unitPrice:Number(i.valor_unitario||0), total:Number(i.valor_total||0) }; }), payments:(x.pagamentos||[]).map(function(p){ return { type:p.tipo_pagamento||'', value:Number(p.valor||0), accountId:Number(p.conta_id||0)||'', dueDate:p.data_prevista||'', obs:p.observacoes||'' }; }) };
       });
       state.cheques = cheques.map(function(c){ return { id:c.id, code:c.codigo||'', saleId:Number(c.venda_id||0), customerId:Number(c.cliente_id||0), number:c.numero_cheque||'', bank:c.banco||'', emitter:c.emitente_nome||'', value:Number(c.valor||0), dueDate:c.data_vencimento||'', status:c.status||'em carteira' }; });
-      state.finance = finance.map(function(f){ return { id:f.id, code:f.codigo||'', type:f.tipo||'', category:f.categoria||'', partyName:f.favorecido||'', accountId:Number(f.conta_id||0)||'', date:f.data_lancamento||'', value:Number(f.valor||0), origin:f.origem||'', obs:f.observacoes||'' }; });
-      state.receivables = receivables.map(function(r){ return { id:r.id, code:r.codigo||'', customerId:Number(r.cliente_id||0)||'', partyName:r.nome_cliente||'', category:r.categoria||'', originalValue:Number(r.valor_original||0), openValue:Number(r.valor_aberto||0), date:r.data_vencimento||r.data_lancamento||'', status:r.status||'aberto', origin:r.origem||'', accountId:Number(r.conta_id||0)||'', obs:r.observacoes||'', antecipacaoId:Number(r.antecipacao_id||0)||'' }; });
-      state.borders = (antecipacoes||[]).map(function(b){ return { id:b.id, code:b.codigo||'', date:b.data_lancamento||'', institution:b.instituicao||'', bordero:b.bordero||'', accountId:Number(b.conta_id||0)||'', gross:Number(b.valor_bruto||0), net:Number(b.valor_liquido||0), fee:Number(b.valor_taxa||0), status:b.status||'efetivado', obs:b.observacoes||'', items:(b.itens||[]).map(function(it){ return { receivableId:Number(it.conta_receber_id||0)||'', chequeId:Number(it.cheque_id||0)||'', value:Number(it.valor||0), customerName:it.nome_cliente||'', category:it.categoria||'', chequeNumber:it.numero_cheque||'' }; }) }; });
+      state.finance = finance.map(function(f){ return { id:f.id, code:f.codigo||'', type:f.tipo||'', category:f.categoria||'', partyName:f.favorecido||'', accountId:Number(f.conta_id||0)||'', date:(String(f.data_lancamento||'').slice(0,10)), value:Number(f.valor||0), origin:f.origem||'', obs:f.observacoes||'' }; });
+      state.receivables = receivables.map(function(r){ return { id:r.id, code:r.codigo||'', customerId:Number(r.cliente_id||0)||'', partyName:r.nome_cliente||'', category:r.categoria||'', originalValue:Number(r.valor_original||0), openValue:Number(r.valor_aberto||0), date:r.data_vencimento||r.data_lancamento||'', status:r.status||'aberto', origin:r.origem||'', accountId:Number(r.conta_id||0)||'', obs:r.observacoes||'' }; });
+      state.payables = payables.map(function(r){ return { id:r.id, code:r.codigo||'', partyName:r.favorecido||'', category:r.categoria||'', originalValue:Number(r.valor_original||0), openValue:Number(r.valor_aberto||0), date:r.data_vencimento||r.data_lancamento||'', status:r.status||'aberto', origin:r.origem||'', accountId:Number(r.conta_id||0)||'', obs:r.observacoes||'' }; });
+      state.purchases = purchases.map(function(p){ return { id:p.id, code:p.codigo||'', supplierId:Number(p.fornecedor_id||0), date:p.data_compra||'', productId:Number(p.produto_id||0), qty:Number(p.quantidade_kg||0), costPrice:Number(p.valor_custo||0), totalValue:Number(p.valor_total||0), paymentType:p.tipo_pagamento||'a prazo', accountId:Number(p.conta_id||0)||'', dueDate:p.data_vencimento||'', avgCostAfter:0, obs:p.observacoes||'' }; });
+      state.lots = lots.map(function(l){ return { id:l.id, code:l.codigo||'', supplierId:Number(l.fornecedor_id||0), date:l.data_lote||'', qtyKg:Number(l.quantidade_kg||0), priceKg:Number(l.valor_kg||0), freight:Number(l.frete||0), totalCost:Number(l.valor_total||0), status:l.status||'disponível', obs:l.observacoes||'' }; });
+      state.productions = productions.map(function(p){ return { id:p.id, code:p.codigo||'', lotId:Number(p.lote_id||0), provider:p.prestador||'', date:p.data_producao||'', totalQty:Number(p.quantidade_total||0), totalCost:Number(p.custo_total||0), items:(p.itens||[]).map(function(i){ return { productId:Number(i.produto_id||0), qty:Number(i.quantidade_kg||0), unitCost:Number(i.custo_unitario||0), total:Number(i.valor_total||0) }; }) }; });
+      state.stockMoves = stockMoves.map(function(m){ return { id:m.id, productId:Number(m.produto_id||0), type:m.tipo||'', origin:m.origem||'', originId:Number(m.origem_id||0), qty:Number(m.quantidade_kg||0), cost:Number(m.valor_unitario||0), date:m.data_movimento||'' }; });
+
+      for(var j=0;j<state.products.length;j++){
+        var prod=state.products[j];
+        var qtyTotal=0, valueTotal=0, stock=0, latestCost=Number(prod.cost||0);
+        for(var a=0;a<state.purchases.length;a++){
+          var pur=state.purchases[a];
+          if(Number(pur.productId)===Number(prod.id)){
+            qtyTotal += Number(pur.qty||0);
+            valueTotal += Number(pur.totalValue||0);
+            latestCost = Number(pur.costPrice||latestCost||0);
+          }
+        }
+        for(var b=0;b<state.stockMoves.length;b++){
+          var mv=state.stockMoves[b];
+          if(Number(mv.productId)===Number(prod.id)){
+            stock += (mv.type==='entrada'?1:-1) * Number(mv.qty||0);
+          }
+        }
+        prod.purchaseQtyTotal = qtyTotal;
+        prod.purchaseValueTotal = valueTotal;
+        prod.avgCost = qtyTotal ? (valueTotal/qtyTotal) : Number(prod.avgCost||latestCost||0);
+        prod.cost = latestCost;
+        prod.stock = Math.max(0, stock);
+      }
       save();
     }catch(err){ console.error(err); }
   }
@@ -137,24 +177,6 @@
   function supplierName(id){ var s=byId(state.suppliers,id); return s?s.name:''; }
   function productName(id){ var p=byId(state.products,id); return p?p.name:''; }
   function institutionName(id){ var x=byId(state.institutions,id); return x?x.name:''; }
-  function receivableType(r){
-    var c=String((r&&r.category)||'').toLowerCase();
-    if(c.indexOf('cheque')>=0) return 'cheque';
-    if(c.indexOf('boleto')>=0) return 'boleto';
-    if(c.indexOf('cart')>=0) return 'cartao';
-    return 'outro';
-  }
-  function borderEligibleReceivables(){
-    return state.receivables.filter(function(r){
-      var st=String(r.status||'').toLowerCase();
-      var tp=receivableType(r);
-      return (tp==='cheque' || tp==='boleto' || tp==='cartao') && (st==='aberto' || st==='parcial' || st==='devolvido');
-    });
-  }
-  function borderSelectedReceivables(){
-    var ids=(uiState.borderSelectedIds||[]).map(function(x){ return Number(x); });
-    return borderEligibleReceivables().filter(function(r){ return ids.indexOf(Number(r.id))>=0; });
-  }
   function startReceiveReceivable(id){ uiState.receivableSettleId=Number(id); setPage('receivables'); }
   window.startEditCadastro = function startEditCadastro(kind,id){ var key='editing'+kind.charAt(0).toUpperCase()+kind.slice(1)+'Id'; uiState[key]=Number(id); setPage(kind==='product'?'products':kind+'s'); }
   window.clearEditCadastro = function clearEditCadastro(kind){ var key='editing'+kind.charAt(0).toUpperCase()+kind.slice(1)+'Id'; uiState[key]=null; setPage(kind==='product'?'products':kind+'s'); }
@@ -412,40 +434,20 @@
   }
   function renderCheques(){
     var rows='';
-    state.cheques.slice().reverse().forEach(function(c){
-      var linkedRec = null;
-      for(var rr=0; rr<state.receivables.length; rr++){
-        var rec = state.receivables[rr];
-        if(receivableType(rec)==='cheque' && Number(rec.customerId)===Number(c.customerId) && Number(rec.originalValue||0)===Number(c.value||0) && String(rec.date||'')===String(c.dueDate||'')){ linkedRec = rec; break; }
-      }
-      rows+='<tr><td>'+(c.code||'')+'</td><td>'+c.number+'</td><td>'+customerName(c.customerId)+'</td><td>'+(c.emitter||'')+'</td><td>'+(c.bank||'')+'</td><td>'+money(c.value)+'</td><td>'+(c.dueDate||'')+'</td><td><span class="pill">'+c.status+'</span></td><td class="list-actions">'+
-      ((c.status==='em carteira' && linkedRec)?'<button type="button" class="btn secondary action-border" data-receivable-id="'+linkedRec.id+'" data-id="'+c.id+'">Antecipar</button>':'')+
-      ((c.status==='antecipado' && linkedRec)?'<button type="button" class="btn danger action-return" data-receivable-id="'+linkedRec.id+'" data-id="'+c.id+'">Devolvido</button>':'')+
-      '</td></tr>';
-    });
+    state.cheques.slice().reverse().forEach(function(c){ rows+='<tr><td>'+(c.code||'')+'</td><td>'+c.number+'</td><td>'+customerName(c.customerId)+'</td><td>'+(c.emitter||'')+'</td><td>'+(c.bank||'')+'</td><td>'+money(c.value)+'</td><td>'+(c.dueDate||'')+'</td><td><span class="pill">'+c.status+'</span></td><td class="list-actions">'+
+      (c.status==='em carteira'?'<button class="btn secondary action-border" data-id="'+c.id+'">Antecipar</button>':'')+
+      (c.status==='antecipado'?'<button class="btn danger action-return" data-id="'+c.id+'">Devolvido</button>':'')+
+      '</td></tr>'; });
     return '<div class="card"><h3>Cheques</h3><table><thead><tr><th>Código</th><th>Número</th><th>Cliente</th><th>Emitente</th><th>Banco</th><th>Valor</th><th>Venc.</th><th>Status</th><th>Ações</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
   }
   function renderBorders(){
-    var instOpts='<option value="">Selecione</option>';
-    state.institutions.forEach(function(i){ instOpts+='<option value="'+i.id+'">'+i.name+'</option>'; });
+    var instOpts=optionsFrom(state.institutions,function(i){return i.name;});
     var accOpts=optionsFrom(state.accounts,function(a){return a.name;});
-    var selecionados=borderSelectedReceivables();
-    var bruto=selecionados.reduce(function(s,r){ return s + Number(r.openValue||0); },0);
-    var selectedMap={};
-    (uiState.borderSelectedIds||[]).forEach(function(id){ selectedMap[String(id)] = true; });
-    var titleRows='';
-    borderEligibleReceivables().forEach(function(r){
-      titleRows+='<tr><td><input type="checkbox" class="border-title" value="'+r.id+'" '+(selectedMap[String(r.id)]?'checked':'')+' /></td><td>'+(r.code||'')+'</td><td>'+(r.partyName||customerName(r.customerId)||'')+'</td><td>'+(receivableType(r))+'</td><td>'+money(r.openValue)+'</td><td>'+(r.date||'')+'</td><td>'+(r.status||'')+'</td></tr>';
-    });
-    if(!titleRows) titleRows='<tr><td colspan="7" class="muted">Não há títulos elegíveis para antecipação.</td></tr>';
+    var chequeRows='';
+    state.cheques.forEach(function(c){ if(c.status==='em carteira') chequeRows+='<tr><td><input type="checkbox" name="borderCheque" value="'+c.id+'" /></td><td>'+c.number+'</td><td>'+customerName(c.customerId)+'</td><td>'+money(c.value)+'</td><td>'+(c.dueDate||'')+'</td></tr>'; });
     var rows='';
-    state.borders.slice().reverse().forEach(function(b){
-      var desc=(b.items||[]).map(function(it){ return (it.customerName||'')+' '+(it.chequeNumber?('CHQ '+it.chequeNumber):''); }).filter(Boolean).join(', ');
-      rows+='<tr><td>'+(b.code||('#'+b.id))+'</td><td>'+(b.bordero||'')+'</td><td>'+b.date+'</td><td>'+(b.institution||'')+'</td><td>'+money(b.gross)+'</td><td>'+money(b.net)+'</td><td>'+money(b.fee)+'</td><td>'+accountName(b.accountId)+'</td><td>'+(desc||'-')+'</td></tr>';
-    });
-    var quickInfo='';
-    if((uiState.borderQuickSelectIds||[]).length){ quickInfo='<div class="warning" style="margin-bottom:10px">Título enviado do submenu de cheques já pré-selecionado para antecipação.</div>'; }
-    return '<div class="grid two"><div class="card"><h3>Nova antecipação / borderô</h3>'+quickInfo+'<form id="form_borders"><div class="row-2"><div><label>Instituição</label><select name="institutionId">'+instOpts+'</select></div><div><label>Data</label><input type="date" name="date" value="'+today()+'" /></div><div><label>Conta de entrada</label><select name="accountId">'+accOpts+'</select></div><div><label>Borderô</label><input name="bordero" placeholder="Número do borderô" /></div><div><label>Valor bruto</label><input name="gross" type="number" step="0.01" value="'+bruto.toFixed(2)+'" readonly /></div><div><label>Valor líquido</label><input name="net" type="number" step="0.01" /></div><div><label>Taxa / despesa</label><input name="fee" type="number" step="0.01" value="0.00" readonly /></div><div><label>Total títulos</label><input name="qtyTitles" value="'+selecionados.length+'" readonly /></div></div><label>Observação</label><input name="obs" /><h3 style="margin-top:14px">Títulos elegíveis</h3><table><thead><tr><th><input type="checkbox" id="borderSelectAll" /></th><th>Código</th><th>Cliente</th><th>Tipo</th><th>Em aberto</th><th>Venc.</th><th>Status</th></tr></thead><tbody>'+titleRows+'</tbody></table><div class="toolbar" style="margin-top:12px"><button type="submit" class="btn">Salvar antecipação</button></div></form></div><div class="card"><h3>Antecipações</h3><table><thead><tr><th>Código</th><th>Borderô</th><th>Data</th><th>Instituição</th><th>Bruto</th><th>Líquido</th><th>Taxa</th><th>Conta</th><th>Títulos</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+    state.borders.slice().reverse().forEach(function(b){ rows+='<tr><td>'+(b.code||('#'+b.id))+'</td><td>'+b.date+'</td><td>'+institutionName(b.institutionId)+'</td><td>'+money(b.gross)+'</td><td>'+money(b.net)+'</td><td>'+money(b.fee)+'</td><td>'+accountName(b.accountId)+'</td></tr>'; });
+    return '<div class="grid two"><div class="card"><h3>Novo borderô</h3><form id="form_borders"><div class="row-2"><div><label>Instituição</label><select name="institutionId">'+instOpts+'</select></div><div><label>Data</label><input type="date" name="date" value="'+today()+'" /></div><div><label>Conta de entrada</label><select name="accountId">'+accOpts+'</select></div><div><label>Valor líquido</label><input name="net" type="number" step="0.01" /></div></div><label>Observação</label><input name="obs" /><h3 style="margin-top:14px">Cheques em carteira</h3><table><thead><tr><th></th><th>Número</th><th>Cliente</th><th>Valor</th><th>Venc.</th></tr></thead><tbody>'+chequeRows+'</tbody></table><div class="toolbar" style="margin-top:12px"><button type="submit" class="btn">Salvar borderô</button></div></form></div><div class="card"><h3>Borderôs</h3><table><thead><tr><th>Nº</th><th>Data</th><th>Instituição</th><th>Bruto</th><th>Líquido</th><th>Taxa</th><th>Conta</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
   }
   function renderFinance(){
     var accOpts=optionsFrom(state.accounts,function(a){return a.name;});
@@ -602,7 +604,7 @@
       };
       if(f.elements.qty) f.elements.qty.oninput=recalcTotal;
       if(f.elements.costPrice) f.elements.costPrice.oninput=recalcTotal;
-      f.onsubmit=function(e){
+      f.onsubmit=async function(e){
         e.preventDefault();
         var supplierId=Number(f.elements.supplierId.value||0), productId=Number(f.elements.productId.value||0), qty=Number(f.elements.qty.value||0), costPrice=Number(f.elements.costPrice.value||0), totalValue=Number(f.elements.totalValue.value||0), accountId=Number(f.elements.accountId.value||0);
         var paymentType=String(f.elements.paymentType.value||'a prazo'), dueDate=f.elements.dueDate.value||f.elements.date.value;
@@ -611,127 +613,40 @@
         if(qty<=0) return alert('Informe a quantidade.');
         if(costPrice<=0) return alert('Informe o valor de custo.');
         if(totalValue<=0) totalValue = qty*costPrice;
-        var prod=byId(state.products,productId);
-        if(!prod) return;
-        if(prod.type!=='revenda') return alert('Essa entrada manual é somente para produtos de terceiros/revenda.');
-        prod.purchaseQtyTotal = Number(prod.purchaseQtyTotal||0) + qty;
-        prod.purchaseValueTotal = Number(prod.purchaseValueTotal||0) + totalValue;
-        prod.avgCost = prod.purchaseQtyTotal ? (prod.purchaseValueTotal / prod.purchaseQtyTotal) : 0;
-        prod.cost = costPrice;
-        prod.stock = Number(prod.stock||0) + qty;
-        var purchaseId=nextId(state.purchases);
-        var purchaseCode=nextCode('ENT', state.purchases);
-        state.purchases.push({id:purchaseId,code:purchaseCode,supplierId:supplierId,date:f.elements.date.value,productId:productId,qty:qty,costPrice:costPrice,totalValue:totalValue,paymentType:paymentType,accountId:accountId,dueDate:dueDate,avgCostAfter:prod.avgCost,obs:f.elements.obs.value});
-        state.stockMoves.push({id:nextId(state.stockMoves),purchaseId:purchaseId,productId:productId,type:'entrada',origin:'compra revenda',qty:qty,cost:costPrice,date:f.elements.date.value});
-        state.payables.push({id:nextId(state.payables),purchaseId:purchaseId,partyName:supplierName(supplierId),category:'entrada mercadoria',originalValue:totalValue,openValue:(paymentType==='a vista'?0:totalValue),date:(paymentType==='a vista'?f.elements.date.value:dueDate),status:(paymentType==='a vista'?'pago':'aberto')});
-        if(paymentType==='a vista'){
-          if(!accountId) return alert('Escolha a conta de saída para pagamento à vista.');
-          state.finance.push({id:nextId(state.finance),type:'saida',category:'entrada mercadoria',partyName:supplierName(supplierId),accountId:accountId,date:f.elements.date.value,value:totalValue,origin:'compra_revenda'});
-        }
-        save(); render(); setPage('purchases');
+        try{
+          await apiPost('/compras',{
+            codigo: nextCode('ENT', state.purchases),
+            supplierId:supplierId,
+            productId:productId,
+            qty:qty,
+            costPrice:costPrice,
+            totalValue:totalValue,
+            paymentType:paymentType,
+            accountId:accountId||null,
+            date:f.elements.date.value,
+            dueDate:dueDate,
+            obs:f.elements.obs.value||''
+          });
+          f.reset();
+          f.elements.date.value=today();
+          f.elements.dueDate.value=today();
+          await syncRemoteCadastros();
+          render(); setPage('purchases');
+        }catch(err){ alert(err.message||'Erro ao salvar entrada de mercadoria.'); }
       };
     }
     var delBtns=document.querySelectorAll('.del-purchase');
-    for(var i=0;i<delBtns.length;i++) delBtns[i].onclick=function(){
+    for(var i=0;i<delBtns.length;i++) delBtns[i].onclick=async function(){
       var id=Number(this.getAttribute('data-id'));
-      var purchase=byId(state.purchases,id); if(!purchase) return;
       if(!confirm('Excluir essa entrada de mercadoria?')) return;
-      state.purchases = state.purchases.filter(function(x){ return Number(x.id)!==id; });
-      state.stockMoves = state.stockMoves.filter(function(m){ return !(Number(m.purchaseId||0)===id || (m.origin==='compra revenda' && Number(m.productId)===Number(purchase.productId) && String(m.date||'')===String(purchase.date||'') && Number(m.qty||0)===Number(purchase.qty||0) && Number(m.cost||0)===Number(purchase.costPrice||0))); });
-      state.payables = state.payables.filter(function(p){ return Number(p.purchaseId||0)!==id; });
-      state.finance = state.finance.filter(function(fin){ return !(fin.origin==='compra_revenda' && Number(fin.accountId||0)===Number(purchase.accountId||0) && String(fin.date||'')===String(purchase.date||'') && Number(fin.value||0)===Number(purchase.totalValue||0) && String(fin.partyName||'')===String(supplierName(purchase.supplierId)||'')); });
-      recalcProductPurchaseMetrics(purchase.productId);
-      state.purchases.forEach(function(x){ if(Number(x.productId)===Number(purchase.productId)){ var prod=byId(state.products,purchase.productId); x.avgCostAfter = prod ? Number(prod.avgCost||0) : 0; } });
-      save(); render(); setPage('purchases');
+      try{
+        await apiDelete('/compras/'+id);
+        await syncRemoteCadastros();
+        render(); setPage('purchases');
+      }catch(err){ alert(err.message||'Erro ao excluir entrada.'); }
     };
   }
   function bindTransfers(){ var f=document.getElementById('form_transfers'); if(!f) return; f.onsubmit=function(e){ e.preventDefault(); var fromId=Number(f.elements.fromId.value), toId=Number(f.elements.toId.value), value=Number(f.elements.value.value||0); if(!fromId||!toId||fromId===toId) return alert('Escolha contas diferentes.'); state.transfers.push({id:nextId(state.transfers),fromId:fromId,toId:toId,date:f.elements.date.value,value:value}); state.finance.push({id:nextId(state.finance),type:'saida',category:'transferência',partyName:accountName(toId),accountId:fromId,date:f.elements.date.value,value:value,origin:'transferencia'}); state.finance.push({id:nextId(state.finance),type:'entrada',category:'transferência',partyName:accountName(fromId),accountId:toId,date:f.elements.date.value,value:value,origin:'transferencia'}); save(); render(); } }
-
-  function bindCheques(){
-    var antBtns=document.querySelectorAll('.action-border');
-    for(var i=0;i<antBtns.length;i++) antBtns[i].onclick=function(){
-      var rid=Number(this.getAttribute('data-receivable-id')||0);
-      uiState.borderSelectedIds = rid?[rid]:[];
-      uiState.borderQuickSelectIds = rid?[rid]:[];
-      render(); setPage('borders');
-    };
-    var retBtns=document.querySelectorAll('.action-return');
-    for(var j=0;j<retBtns.length;j++) retBtns[j].onclick=async function(){
-      var rid=Number(this.getAttribute('data-receivable-id')||0);
-      if(!rid) return alert('Não encontrei o título vinculado a este cheque.');
-      if(!confirm('Confirmar devolução deste título antecipado?')) return;
-      try{
-        await apiPost('/contas-receber/'+rid+'/devolver', { date: today(), obs:'Devolvido pelo submenu de cheques' });
-        await syncRemoteCadastros();
-        render(); setPage('cheques');
-      }catch(err){ alert(err.message||'Erro ao devolver cheque.'); }
-    };
-  }
-
-  function bindBorders(){
-    var checks=document.querySelectorAll('.border-title');
-    for(var i=0;i<checks.length;i++) checks[i].onchange=function(){
-      var id=Number(this.value||0), arr=(uiState.borderSelectedIds||[]).slice();
-      if(this.checked){
-        if(arr.indexOf(id)<0) arr.push(id);
-      } else {
-        arr=arr.filter(function(x){ return Number(x)!==id; });
-      }
-      uiState.borderSelectedIds=arr;
-      render(); setPage('borders');
-    };
-    var markAll=document.getElementById('borderSelectAll');
-    if(markAll) markAll.onchange=function(){
-      if(this.checked) uiState.borderSelectedIds = borderEligibleReceivables().map(function(r){ return Number(r.id); });
-      else uiState.borderSelectedIds = [];
-      render(); setPage('borders');
-    };
-    var f=document.getElementById('form_borders');
-    if(!f) return;
-    var recalc=function(){
-      var bruto=borderSelectedReceivables().reduce(function(s,r){ return s + Number(r.openValue||0); },0);
-      var liquido=Number(f.elements.net.value||0);
-      f.elements.gross.value = bruto.toFixed(2);
-      f.elements.qtyTitles.value = String(borderSelectedReceivables().length);
-      f.elements.fee.value = Math.max(0, bruto-liquido).toFixed(2);
-      if(markAll){
-        var all=borderEligibleReceivables();
-        markAll.checked = !!all.length && borderSelectedReceivables().length===all.length;
-      }
-    };
-    if(f.elements.net) f.elements.net.oninput=recalc;
-    recalc();
-    f.onsubmit=async function(e){
-      e.preventDefault();
-      var selected=borderSelectedReceivables();
-      var accountId=Number(f.elements.accountId.value||0);
-      var institutionId=Number(f.elements.institutionId.value||0);
-      var institution=(byId(state.institutions,institutionId)||{}).name||'';
-      var net=Number(f.elements.net.value||0);
-      var gross=selected.reduce(function(s,r){ return s + Number(r.openValue||0); },0);
-      if(!selected.length) return alert('Selecione ao menos um título.');
-      if(!accountId) return alert('Escolha a conta de entrada.');
-      if(net<=0) return alert('Informe o valor líquido.');
-      if(net>gross) return alert('O valor líquido não pode ser maior que o bruto.');
-      try{
-        await apiPost('/antecipacoes', {
-          codigo: nextCode('BOR', state.borders),
-          bordero: f.elements.bordero.value||'',
-          date: f.elements.date.value||today(),
-          institution: institution,
-          accountId: accountId,
-          net: net,
-          obs: f.elements.obs.value||'',
-          receivableIds: selected.map(function(r){ return Number(r.id); })
-        });
-        uiState.borderSelectedIds=[];
-        uiState.borderQuickSelectIds=[];
-        await syncRemoteCadastros();
-        alert('Antecipação salva com sucesso.');
-        render(); setPage('borders');
-      }catch(err){ alert(err.message||'Erro ao salvar antecipação.'); }
-    };
-  }
 
   function bindFinance(){
     var f=document.getElementById('form_finance');
@@ -792,7 +707,7 @@
   function bindPayables(){
     var f=document.getElementById('form_payables');
     if(f){
-      f.onsubmit=function(e){
+      f.onsubmit=async function(e){
         e.preventDefault();
         var t=f.elements.partyType.value, partyName='';
         if(t==='fornecedor') partyName=supplierName(Number(f.elements.supplierId.value||0));
@@ -801,20 +716,32 @@
         var value=Number(f.elements.value.value||0), accountId=Number(f.elements.accountId.value||0), payNow=f.elements.payNow.value==='sim';
         if(!partyName) return alert('Informe o favorecido.');
         if(value<=0) return alert('Informe o valor.');
-        var payable={id:nextId(state.payables), code: nextCode('PAG', state.payables), partyName:partyName, category:f.elements.category.value||'manual', originalValue:value, openValue:payNow?0:value, date:f.elements.dueDate.value||f.elements.date.value, status:payNow?'pago':'aberto', origin:'manual', obs:f.elements.obs.value};
-        state.payables.push(payable);
-        if(payNow){
-          if(!accountId) return alert('Escolha a conta de saída.');
-          state.finance.push({id:nextId(state.finance),type:'saida',category:payable.category,partyName:partyName,accountId:accountId,date:f.elements.date.value,value:value,origin:'pagamento_manual'});
-        }
-        uiState.payableSettleId=null;
-        save(); render(); setPage('payables');
+        try{
+          await apiPost('/contas-pagar',{
+            codigo: nextCode('PAG', state.payables),
+            favorecido: partyName,
+            categoria: f.elements.category.value||'manual',
+            valor: value,
+            date: f.elements.date.value,
+            dueDate: f.elements.dueDate.value||f.elements.date.value,
+            payNow: payNow,
+            accountId: payNow?(accountId||null):null,
+            obs: f.elements.obs.value||'',
+            origem: 'manual'
+          });
+          uiState.payableSettleId=null;
+          f.reset();
+          f.elements.date.value=today();
+          f.elements.dueDate.value=today();
+          await syncRemoteCadastros();
+          render(); setPage('payables');
+        }catch(err){ alert(err.message||'Erro ao salvar conta a pagar.'); }
       };
     }
     var btns=document.querySelectorAll('.pay-payable');
     for(var i=0;i<btns.length;i++) btns[i].onclick=function(){ uiState.payableSettleId=Number(this.getAttribute('data-id')); render(); setPage('payables'); };
     var settleForm=document.getElementById('form_settle_payable');
-    if(settleForm) settleForm.onsubmit=function(e){
+    if(settleForm) settleForm.onsubmit=async function(e){
       e.preventDefault();
       var p=byId(state.payables, Number(settleForm.elements.payableId.value||0));
       if(!p) return;
@@ -822,16 +749,95 @@
       if(value<=0) return alert('Informe o valor pago.');
       if(value>Number(p.openValue||0)) return alert('O valor não pode ser maior que o em aberto.');
       if(!accountId) return alert('Escolha a conta de saída.');
-      state.finance.push({id:nextId(state.finance),type:'saida',category:p.category||'conta a pagar',partyName:p.partyName,accountId:accountId,date:date,value:value,origin:'conta_pagar',obs:settleForm.elements.obs.value||''});
-      p.openValue = Number((Number(p.openValue||0)-value).toFixed(2));
-      p.status = p.openValue<=0 ? 'pago' : 'parcial';
-      uiState.payableSettleId=null;
-      save(); render(); setPage('payables');
+      try{
+        await apiPost('/contas-pagar/'+p.id+'/pagar', { value:value, accountId:accountId, date:date, obs:settleForm.elements.obs.value||'' });
+        uiState.payableSettleId=null;
+        await syncRemoteCadastros();
+        render(); setPage('payables');
+      }catch(err){ alert(err.message||'Erro ao baixar conta a pagar.'); }
     };
     var cancel=document.getElementById('cancelSettlePayable');
     if(cancel) cancel.onclick=function(){ uiState.payableSettleId=null; render(); setPage('payables'); };
   }
 
+  function bindLots(){
+    var f=document.getElementById('form_lots');
+    if(!f) return;
+    f.onsubmit=async function(e){
+      e.preventDefault();
+      var supplierId=Number(f.elements.supplierId.value||0), qtyKg=Number(f.elements.qtyKg.value||0), priceKg=Number(f.elements.priceKg.value||0), freight=Number(f.elements.freight.value||0);
+      if(!supplierId) return alert('Selecione o fornecedor.');
+      if(qtyKg<=0) return alert('Informe a quantidade do lote.');
+      if(priceKg<0) return alert('Informe o valor por kg.');
+      try{
+        await apiPost('/lotes',{
+          codigo: nextCode('LOT', state.lots),
+          supplierId:supplierId,
+          date:f.elements.date.value,
+          qtyKg:qtyKg,
+          priceKg:priceKg,
+          freight:freight,
+          obs:''
+        });
+        f.reset();
+        f.elements.date.value=today();
+        f.elements.freight.value='0';
+        await syncRemoteCadastros();
+        render(); setPage('production');
+      }catch(err){ alert(err.message||'Erro ao salvar lote.'); }
+    };
+  }
+
+  function bindProduction(){
+    var container=document.getElementById('productionItems');
+    var addBtn=document.getElementById('addProductionItem');
+    if(container && addBtn && !uiState.productionDraft){
+      uiState.productionDraft=[{productId:'', qty:''}];
+    }
+    function itemHtml(item, idx, opts){
+      return '<div class="card" style="margin-bottom:10px"><div class="row-2"><div><label>Produto</label><select name="prod_productId_'+idx+'">'+opts.replace('value="'+(item.productId||'')+'"','value="'+(item.productId||'')+'" selected')+'</select></div><div><label>Quantidade (kg)</label><input type="number" step="0.01" min="0" name="prod_qty_'+idx+'" value="'+(item.qty||'')+'" /></div></div><div class="toolbar" style="margin-top:8px"><button type="button" class="btn danger remove-production-item" data-index="'+idx+'">Remover item</button></div></div>';
+    }
+    if(container){
+      var opts=document.getElementById('prodProductOptions').innerHTML;
+      var html='';
+      (uiState.productionDraft||[{productId:'',qty:''}]).forEach(function(item, idx){ html += itemHtml(item, idx, opts); });
+      container.innerHTML=html;
+      var rem=document.querySelectorAll('.remove-production-item');
+      for(var r=0;r<rem.length;r++) rem[r].onclick=function(){
+        var idx=Number(this.getAttribute('data-index'));
+        uiState.productionDraft.splice(idx,1);
+        if(!uiState.productionDraft.length) uiState.productionDraft=[{productId:'', qty:''}];
+        render(); setPage('production');
+      };
+    }
+    if(addBtn) addBtn.onclick=function(){ if(!uiState.productionDraft) uiState.productionDraft=[]; uiState.productionDraft.push({productId:'', qty:''}); render(); setPage('production'); };
+    var f=document.getElementById('form_production');
+    if(f) f.onsubmit=async function(e){
+      e.preventDefault();
+      var lotId=Number(f.elements.lotId.value||0);
+      if(!lotId) return alert('Selecione o lote.');
+      var items=[];
+      var draft=uiState.productionDraft||[];
+      for(var i=0;i<draft.length;i++){
+        var productId=Number(f.elements['prod_productId_'+i].value||0), qty=Number(f.elements['prod_qty_'+i].value||0);
+        if(productId && qty>0) items.push({productId:productId, qty:qty});
+      }
+      if(!items.length) return alert('Informe ao menos um produto produzido.');
+      try{
+        await apiPost('/producoes',{
+          codigo: nextCode('PRD', state.productions),
+          lotId: lotId,
+          provider: f.elements.provider.value||'',
+          date: f.elements.date.value,
+          items: items,
+          obs:''
+        });
+        uiState.productionDraft=[{productId:'', qty:''}];
+        await syncRemoteCadastros();
+        render(); setPage('production');
+      }catch(err){ alert(err.message||'Erro ao salvar produção.'); }
+    };
+  }
   function bindDeletes(){
     var lotBtns=document.querySelectorAll('.del-lot');
     for(var i=0;i<lotBtns.length;i++) lotBtns[i].onclick=function(){
@@ -839,23 +845,14 @@
       var hasProd=state.productions.some(function(p){ return Number(p.lotId)===id; });
       if(hasProd) return alert('Esse lote possui produção vinculada. Exclua a produção primeiro.');
       if(!confirm('Excluir lote #'+id+'?')) return;
-      state.lots=state.lots.filter(function(l){ return Number(l.id)!==id; });
-      save(); render();
+      apiDelete('/lotes/'+id).then(function(){ return syncRemoteCadastros(); }).then(function(){ render(); }).catch(function(err){ alert(err.message||'Erro ao excluir lote.'); });
     };
     var prodBtns=document.querySelectorAll('.del-production');
     for(var j=0;j<prodBtns.length;j++) prodBtns[j].onclick=function(){
       var id=Number(this.getAttribute('data-id'));
       var prod=byId(state.productions,id); if(!prod) return;
       if(!confirm('Excluir produção #'+id+'?')) return;
-      for(var k=0;k<prod.items.length;k++){
-        var item=prod.items[k];
-        var p=byId(state.products,item.productId);
-        if(p){ p.stock=Math.max(0, Number(p.stock||0)-Number(item.qty||0)); }
-      }
-      state.stockMoves = state.stockMoves.filter(function(m){ return !(m.origin==='produção' && m.date===prod.date); });
-      var lot=byId(state.lots,prod.lotId); if(lot) lot.status='disponível';
-      state.productions=state.productions.filter(function(x){ return Number(x.id)!==id; });
-      save(); render();
+      apiDelete('/producoes/'+id).then(function(){ return syncRemoteCadastros(); }).then(function(){ render(); }).catch(function(err){ alert(err.message||'Erro ao excluir produção.'); });
     };
   }
 
