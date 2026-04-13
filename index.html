@@ -87,7 +87,7 @@
     {id:'financeiro', title:'Financeiro', items:[['finance','Lançamentos'],['receivables','Contas a Receber'],['payables','Contas a Pagar'],['transfers','Transferências']]}
   ];
   var menuOpenState={principal:true,cadastros:false,producao:false,financeiro:false};
-  var uiState={receivableSettleId:null,payableSettleId:null,editingCustomerId:null,editingSupplierId:null,editingEmployeeId:null,editingInstitutionId:null,editingProductId:null};
+  var uiState={receivableSettleId:null,payableSettleId:null,editingCustomerId:null,editingSupplierId:null,editingEmployeeId:null,editingInstitutionId:null,editingProductId:null,editingSaleId:null};
 
   // garante códigos nos cadastros antigos
   (function ensureCodes(){
@@ -365,7 +365,9 @@
   }
 
   function optionsFrom(arr,labelFn){ var h='<option value="">Selecione</option>'; arr.forEach(function(x){ h+='<option value="'+x.id+'">'+labelFn(x)+'</option>'; }); return h; }
-  function saleDraft(){ if(!uiState.saleDraft) uiState.saleDraft={items:[{productId:'',qty:'',unitPrice:''}],payments:[{type:'dinheiro',value:'',accountId:'1',dueDate:'',number:'',bank:'',emitter:''}]}; return uiState.saleDraft; }
+  function saleDraft(){ if(!uiState.saleDraft) uiState.saleDraft={customerId:'',date:today(),obs:'',items:[{productId:'',qty:'',unitPrice:''}],payments:[{type:'dinheiro',value:'',accountId:'1',dueDate:'',number:'',bank:'',emitter:''}]}; return uiState.saleDraft; }
+  function syncSaleDraftFromForm(){ var f=document.getElementById('form_sales'); if(!f) return saleDraft(); var draft=saleDraft(); draft.customerId=f.elements.customerId?String(f.elements.customerId.value||''):''; draft.date=f.elements.date?String(f.elements.date.value||today()):today(); draft.obs=f.elements.obs?String(f.elements.obs.value||''):''; var items=[]; for(var i=0;i<draft.items.length;i++){ items.push({productId:(f.elements['item_productId_'+i]&&f.elements['item_productId_'+i].value)||'', qty:(f.elements['item_qty_'+i]&&f.elements['item_qty_'+i].value)||'', unitPrice:(f.elements['item_unitPrice_'+i]&&f.elements['item_unitPrice_'+i].value)||''}); } if(items.length) draft.items=items; var pays=[]; for(var j=0;j<draft.payments.length;j++){ pays.push({ type:(f.elements['pay_type_'+j]&&f.elements['pay_type_'+j].value)||'dinheiro', value:(f.elements['pay_value_'+j]&&f.elements['pay_value_'+j].value)||'', accountId:(f.elements['pay_accountId_'+j]&&f.elements['pay_accountId_'+j].value)||'1', dueDate:(f.elements['pay_dueDate_'+j]&&f.elements['pay_dueDate_'+j].value)||'', number:(f.elements['pay_number_'+j]&&f.elements['pay_number_'+j].value)||'', bank:(f.elements['pay_bank_'+j]&&f.elements['pay_bank_'+j].value)||'', emitter:(f.elements['pay_emitter_'+j]&&f.elements['pay_emitter_'+j].value)||'' }); } if(pays.length) draft.payments=pays; return draft; }
+  window.startEditSale = function startEditSale(id){ var s=byId(state.sales, id); if(!s) return; uiState.editingSaleId=Number(id); uiState.saleDraft={ customerId:String(s.customerId||''), date:s.date||today(), obs:s.obs||'', items:(s.items&&s.items.length?s.items:[{productId:'',qty:'',unitPrice:''}]).map(function(i){ return {productId:String(i.productId||''), qty:String(i.qty||''), unitPrice:String(i.unitPrice||'')}; }), payments:(s.payments&&s.payments.length?s.payments:[{type:'dinheiro',value:'',accountId:'1'}]).map(function(p){ return {type:p.type||p.tipo_pagamento||'dinheiro', value:String(p.value||p.valor||''), accountId:String(p.accountId||p.conta_id||'1'), dueDate:p.dueDate||p.data_prevista||'', number:p.number||p.numero_cheque||'', bank:p.bank||p.banco||'', emitter:p.emitter||p.emitente_nome||''}; }) }; setPage('sales'); };
   function saleItemHtml(item, idx, productOpts){
     return '<div class="card" style="margin-bottom:10px"><div class="row-3"><div><label>Produto</label><select name="item_productId_'+idx+'">'+productOpts.replace('value="'+(item.productId||'')+'"','value="'+(item.productId||'')+'" selected')+'</select></div><div><label>Quantidade (kg)</label><input type="number" step="0.001" min="0" name="item_qty_'+idx+'" value="'+(item.qty||'')+'" /></div><div><label>Valor unitário</label><input type="number" step="0.01" min="0" name="item_unitPrice_'+idx+'" value="'+(item.unitPrice||'')+'" /></div></div><div class="toolbar" style="margin-top:8px"><button type="button" class="btn danger remove-sale-item" data-index="'+idx+'">Remover item</button></div></div>';
   }
@@ -425,18 +427,18 @@
     var productOpts=optionsFrom(state.products,function(p){return (p.code?p.code+' - ':'')+p.name;});
     var accountOpts=optionsFrom(state.accounts,function(a){return a.name;});
     var saleRows='';
-    state.sales.slice().reverse().forEach(function(s){ saleRows+='<tr><td>'+(s.code||('#'+s.id))+'</td><td>'+s.date+'</td><td>'+customerName(s.customerId)+'</td><td>'+money(s.total)+'</td><td>'+money(s.openAmount||0)+'</td></tr>'; });
+    state.sales.slice().reverse().forEach(function(s){ saleRows+='<tr><td>'+(s.code||('#'+s.id))+'</td><td>'+s.date+'</td><td>'+customerName(s.customerId)+'</td><td>'+money(s.total)+'</td><td>'+money(s.openAmount||0)+'</td><td><button type="button" class="btn secondary btn-edit-sale" data-id="'+s.id+'">Editar</button></td></tr>'; });
     var itemsHtml='';
     for(var i=0;i<draft.items.length;i++) itemsHtml += saleItemHtml(draft.items[i], i, productOpts);
     var paysHtml='';
     for(var j=0;j<draft.payments.length;j++) paysHtml += salePaymentHtml(draft.payments[j], j, accountOpts);
-    return '<div class="grid two"><div class="card"><h3>Nova venda</h3><form id="form_sales"><div class="row-2"><div><label>Cliente</label><select name="customerId">'+customerOpts+'</select></div><div><label>Data</label><input type="date" name="date" value="'+today()+'" /></div></div><label>Observação</label><input name="obs" /><div id="saleWarning" class="warning hidden" style="margin-top:10px"></div><h3 style="margin-top:16px">Itens</h3><div id="saleItems">'+itemsHtml+'</div><div class="toolbar"><button type="button" class="btn secondary" id="addSaleItem">+ Item</button></div><h3 style="margin-top:16px">Pagamentos</h3><div id="salePays">'+paysHtml+'</div><div class="toolbar"><button type="button" class="btn secondary" id="addSalePay">+ Pagamento</button></div><div class="card" style="margin-top:12px;background:#f8fafc"><div class="row-3"><div><div class="muted">Total da venda</div><div class="kpi" id="saleTotal">R$ 0,00</div></div><div><div class="muted">Total pagamentos</div><div class="kpi" id="payTotal">R$ 0,00</div></div><div><div class="muted">Diferença</div><div class="kpi" id="diffTotal">R$ 0,00</div></div></div></div><div class="toolbar" style="margin-top:12px"><button type="submit" class="btn">Salvar venda</button></div></form></div><div class="card"><h3>Vendas</h3><table><thead><tr><th>Código</th><th>Data</th><th>Cliente</th><th>Total</th><th>Em aberto</th></tr></thead><tbody>'+saleRows+'</tbody></table></div></div>';
+    var customerSelect = customerOpts.replace('value=\"'+(draft.customerId||'')+'\"','value=\"'+(draft.customerId||'')+'\" selected');
+    return '<div class="grid two"><div class="card"><h3>'+(uiState.editingSaleId?'Editar venda':'Nova venda')+'</h3><form id="form_sales"><div class="row-2"><div><label>Cliente</label><select name="customerId">'+customerSelect+'</select></div><div><label>Data</label><input type="date" name="date" value="'+(draft.date||today())+'" /></div></div><label>Observação</label><input name="obs" value="'+(draft.obs||'')+'" /><div id="saleWarning" class="warning hidden" style="margin-top:10px"></div><h3 style="margin-top:16px">Itens</h3><div id="saleItems">'+itemsHtml+'</div><div class="toolbar"><button type="button" class="btn secondary" id="addSaleItem">+ Item</button></div><h3 style="margin-top:16px">Pagamentos</h3><div id="salePays">'+paysHtml+'</div><div class="toolbar"><button type="button" class="btn secondary" id="addSalePay">+ Pagamento</button></div><div class="card" style="margin-top:12px;background:#f8fafc"><div class="row-3"><div><div class="muted">Total da venda</div><div class="kpi" id="saleTotal">R$ 0,00</div></div><div><div class="muted">Total pagamentos</div><div class="kpi" id="payTotal">R$ 0,00</div></div><div><div class="muted">Diferença</div><div class="kpi" id="diffTotal">R$ 0,00</div></div></div></div><div class="toolbar" style="margin-top:12px"><button type="submit" class="btn">Salvar venda</button></div></form></div><div class="card"><h3>Vendas</h3><table><thead><tr><th>Código</th><th>Data</th><th>Cliente</th><th>Total</th><th>Em aberto</th><th>Ações</th></tr></thead><tbody>'+saleRows+'</tbody></table></div></div>';
   }
   function renderCheques(){
     var rows='';
     state.cheques.slice().reverse().forEach(function(c){ rows+='<tr><td>'+(c.code||'')+'</td><td>'+c.number+'</td><td>'+customerName(c.customerId)+'</td><td>'+(c.emitter||'')+'</td><td>'+(c.bank||'')+'</td><td>'+money(c.value)+'</td><td>'+(c.dueDate||'')+'</td><td><span class="pill">'+c.status+'</span></td><td class="list-actions">'+
-      (c.status==='em carteira'?'<button class="btn secondary action-border" data-id="'+c.id+'">Antecipar</button>':'')+
-      (c.status==='antecipado'?'<button class="btn danger action-return" data-id="'+c.id+'">Devolvido</button>':'')+
+      ((c.status!=='devolvido')?'<button class="btn danger action-return" data-id="'+c.id+'">Devolvido</button>':'')+
       '</td></tr>'; });
     return '<div class="card"><h3>Cheques</h3><table><thead><tr><th>Código</th><th>Número</th><th>Cliente</th><th>Emitente</th><th>Banco</th><th>Valor</th><th>Venc.</th><th>Status</th><th>Ações</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
   }
@@ -563,30 +565,38 @@
     if(!f) return;
     refreshSaleSummary();
     var watch=f.querySelectorAll('input,select');
-    for(var w=0; w<watch.length; w++) watch[w].oninput=watch[w].onchange=refreshSaleSummary;
+    for(var w=0; w<watch.length; w++){
+      watch[w].oninput=refreshSaleSummary;
+      watch[w].onchange=function(){
+        syncSaleDraftFromForm();
+        if((this.name||'').indexOf('pay_type_')===0){ render(); setPage('sales'); return; }
+        refreshSaleSummary();
+      };
+    }
     var addItem=document.getElementById('addSaleItem');
-    if(addItem) addItem.onclick=function(){ saleDraft().items.push({productId:'',qty:'',unitPrice:''}); render(); setPage('sales'); };
+    if(addItem) addItem.onclick=function(){ syncSaleDraftFromForm(); saleDraft().items.push({productId:'',qty:'',unitPrice:''}); render(); setPage('sales'); };
     var addPay=document.getElementById('addSalePay');
-    if(addPay) addPay.onclick=function(){ saleDraft().payments.push({type:'dinheiro',value:'',accountId:'1',dueDate:'',number:'',bank:'',emitter:''}); render(); setPage('sales'); };
+    if(addPay) addPay.onclick=function(){ syncSaleDraftFromForm(); saleDraft().payments.push({type:'dinheiro',value:'',accountId:'1',dueDate:'',number:'',bank:'',emitter:''}); render(); setPage('sales'); };
     var remItems=document.querySelectorAll('.remove-sale-item');
-    for(var i=0;i<remItems.length;i++) remItems[i].onclick=function(){ var idx=Number(this.getAttribute('data-index')); saleDraft().items.splice(idx,1); if(!saleDraft().items.length) saleDraft().items.push({productId:'',qty:'',unitPrice:''}); render(); setPage('sales'); };
+    for(var i=0;i<remItems.length;i++) remItems[i].onclick=function(){ syncSaleDraftFromForm(); var idx=Number(this.getAttribute('data-index')); saleDraft().items.splice(idx,1); if(!saleDraft().items.length) saleDraft().items.push({productId:'',qty:'',unitPrice:''}); render(); setPage('sales'); };
     var remPays=document.querySelectorAll('.remove-sale-pay');
-    for(var j=0;j<remPays.length;j++) remPays[j].onclick=function(){ var idx=Number(this.getAttribute('data-index')); saleDraft().payments.splice(idx,1); if(!saleDraft().payments.length) saleDraft().payments.push({type:'dinheiro',value:'',accountId:'1'}); render(); setPage('sales'); };
+    for(var j=0;j<remPays.length;j++) remPays[j].onclick=function(){ syncSaleDraftFromForm(); var idx=Number(this.getAttribute('data-index')); saleDraft().payments.splice(idx,1); if(!saleDraft().payments.length) saleDraft().payments.push({type:'dinheiro',value:'',accountId:'1'}); render(); setPage('sales'); };
     f.onsubmit=async function(e){
       e.preventDefault();
+      syncSaleDraftFromForm();
       var customerId=Number(f.elements.customerId.value||0);
       if(!customerId) return alert('Selecione o cliente.');
       var data=collectSaleForm(f);
       if(!data.items.length) return alert('Adicione pelo menos um item.');
       if(Math.abs(data.openAmount) > 0.009) return alert('A soma dos pagamentos precisa bater com o total da venda.');
       try{
-        await apiPost('/vendas',{ codigo: nextCode('VEN', state.sales), customerId: customerId, date: f.elements.date.value, total: data.total, openAmount: 0, obs: f.elements.obs.value||'', items: data.items, payments: data.payments });
-        for(var a=0;a<data.items.length;a++){
-          var it=data.items[a], prod=byId(state.products,it.productId);
-          if(prod){ prod.stock=Math.max(0, Number(prod.stock||0)-Number(it.qty||0)); }
-          state.stockMoves.push({id:nextId(state.stockMoves),productId:it.productId,type:'saida',origin:'venda',qty:it.qty,cost:it.unitPrice,date:f.elements.date.value});
+        if(uiState.editingSaleId){
+          await apiPut('/vendas/'+uiState.editingSaleId,{ codigo:(byId(state.sales, uiState.editingSaleId)||{}).code || nextCode('VEN', state.sales), customerId: customerId, date: f.elements.date.value, total: data.total, openAmount: 0, obs: f.elements.obs.value||'', items: data.items, payments: data.payments });
+        } else {
+          await apiPost('/vendas',{ codigo: nextCode('VEN', state.sales), customerId: customerId, date: f.elements.date.value, total: data.total, openAmount: 0, obs: f.elements.obs.value||'', items: data.items, payments: data.payments });
         }
         uiState.saleDraft=null;
+        uiState.editingSaleId=null;
         await syncRemoteCadastros();
         save();
         alert('Venda salva com sucesso.');
@@ -647,6 +657,21 @@
     };
   }
   function bindTransfers(){ var f=document.getElementById('form_transfers'); if(!f) return; f.onsubmit=function(e){ e.preventDefault(); var fromId=Number(f.elements.fromId.value), toId=Number(f.elements.toId.value), value=Number(f.elements.value.value||0); if(!fromId||!toId||fromId===toId) return alert('Escolha contas diferentes.'); state.transfers.push({id:nextId(state.transfers),fromId:fromId,toId:toId,date:f.elements.date.value,value:value}); state.finance.push({id:nextId(state.finance),type:'saida',category:'transferência',partyName:accountName(toId),accountId:fromId,date:f.elements.date.value,value:value,origin:'transferencia'}); state.finance.push({id:nextId(state.finance),type:'entrada',category:'transferência',partyName:accountName(fromId),accountId:toId,date:f.elements.date.value,value:value,origin:'transferencia'}); save(); render(); } }
+
+  function bindCheques(){
+    var btns=document.querySelectorAll('.action-return');
+    for(var i=0;i<btns.length;i++) btns[i].onclick=async function(){
+      var id=Number(this.getAttribute('data-id'));
+      if(!confirm('Confirmar devolução deste cheque?')) return;
+      try{
+        await apiPost('/cheques/'+id+'/devolver', {});
+        await syncRemoteCadastros();
+        render(); setPage('cheques');
+      }catch(err){ alert(err.message||'Erro ao devolver cheque.'); }
+    };
+    var editBtns=document.querySelectorAll('.btn-edit-sale');
+    for(var j=0;j<editBtns.length;j++) editBtns[j].onclick=function(){ startEditSale(Number(this.getAttribute('data-id'))); };
+  }
 
   function bindFinance(){
     var f=document.getElementById('form_finance');
