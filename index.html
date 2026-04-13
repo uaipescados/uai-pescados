@@ -468,7 +468,12 @@
     bindCadastro('suppliers',['name','type','phone','city']);
     bindCadastro('employees',['name','role','phone','salary']);
     bindCadastro('institutions',['name','type','phone','obs']);
-    bindProducts(); bindSales(); bindCheques(); bindBorders(); bindFinance(); bindLots(); bindProduction(); bindPurchases(); bindTransfers(); bindReceivables(); bindPayables(); bindDeletes();
+    bindProducts(); 
+    bindSales(); 
+    //bindCheques(); 
+    bindBorders(); 
+    bindFinance(); 
+    bindLots(); bindProduction(); bindPurchases(); bindTransfers(); bindReceivables(); bindPayables(); bindDeletes();
   }
   function bindCadastro(key,fields){
     var f=document.getElementById('form_'+key); if(!f) return; f.onsubmit=async function(e){ e.preventDefault();
