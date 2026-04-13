@@ -109,13 +109,17 @@
   async function apiPost(path, body){ var r=await fetch(API_BASE+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); var j=await r.json(); if(!r.ok) throw new Error(j.error||('Erro ao salvar '+path)); return j; }
   async function syncRemoteCadastros(){
     try{
-      var remote = await Promise.all([apiGet('/clientes'), apiGet('/fornecedores'), apiGet('/produtos')]);
-      var customers=remote[0], suppliers=remote[1], products=remote[2];
+      var remote = await Promise.all([apiGet('/clientes'), apiGet('/fornecedores'), apiGet('/produtos'), apiGet('/vendas'), apiGet('/cheques')]);
+      var customers=remote[0], suppliers=remote[1], products=remote[2], sales=remote[3], cheques=remote[4];
       state.customers = customers.map(function(x){ return {id:x.id, code:x.codigo||'', name:x.nome||'', phone:x.telefone||'', city:x.cidade||'', creditLimit:Number(x.limite_credito||0)||0, observacoes:x.observacoes||''}; });
       state.suppliers = suppliers.map(function(x){ return {id:x.id, code:x.codigo||'', name:x.nome||'', type:x.tipo||'', phone:x.telefone||'', city:x.cidade||'', observacoes:x.observacoes||''}; });
       var localProductMap={};
       for(var i=0;i<state.products.length;i++){ var lp=state.products[i]; localProductMap[lp.code||('ID'+lp.id)] = lp; }
       state.products = products.map(function(x){ var code=x.codigo||('ID'+x.id); var local=localProductMap[code]||{}; return {id:x.id, code:code, name:x.nome||'', type:x.tipo||'revenda', unit:x.unidade||'kg', cost:Number(local.cost||0), avgCost:Number(local.avgCost||local.cost||0), salePrice:Number(local.salePrice||0), stock:Number(local.stock||0), purchaseQtyTotal:Number(local.purchaseQtyTotal||0), purchaseValueTotal:Number(local.purchaseValueTotal||0)}; });
+      state.sales = sales.map(function(x){
+        return { id:x.id, code:x.codigo||'', customerId:Number(x.cliente_id||0), date:x.data_venda||'', total:Number(x.valor_total||0), openAmount:Number(x.valor_aberto||0), obs:x.observacoes||'', items:(x.itens||[]).map(function(i){ return { productId:Number(i.produto_id||0), qty:Number(i.quantidade_kg||0), unitPrice:Number(i.valor_unitario||0), total:Number(i.valor_total||0) }; }), payments:(x.pagamentos||[]).map(function(p){ return { type:p.tipo_pagamento||'', value:Number(p.valor||0), accountId:Number(p.conta_id||0)||'', dueDate:p.data_prevista||'', obs:p.observacoes||'' }; }) };
+      });
+      state.cheques = cheques.map(function(c){ return { id:c.id, code:c.codigo||'', saleId:Number(c.venda_id||0), customerId:Number(c.cliente_id||0), number:c.numero_cheque||'', bank:c.banco||'', emitter:c.emitente_nome||'', value:Number(c.valor||0), dueDate:c.data_vencimento||'', status:c.status||'em carteira' }; });
       save();
     }catch(err){ console.error(err); }
   }
@@ -312,13 +316,72 @@
   }
 
   function optionsFrom(arr,labelFn){ var h='<option value="">Selecione</option>'; arr.forEach(function(x){ h+='<option value="'+x.id+'">'+labelFn(x)+'</option>'; }); return h; }
+  function saleDraft(){ if(!uiState.saleDraft) uiState.saleDraft={items:[{productId:'',qty:'',unitPrice:''}],payments:[{type:'dinheiro',value:'',accountId:'1',dueDate:'',number:'',bank:'',emitter:''}]}; return uiState.saleDraft; }
+  function saleItemHtml(item, idx, productOpts){
+    return '<div class="card" style="margin-bottom:10px"><div class="row-3"><div><label>Produto</label><select name="item_productId_'+idx+'">'+productOpts.replace('value="'+(item.productId||'')+'"','value="'+(item.productId||'')+'" selected')+'</select></div><div><label>Quantidade (kg)</label><input type="number" step="0.001" min="0" name="item_qty_'+idx+'" value="'+(item.qty||'')+'" /></div><div><label>Valor unitário</label><input type="number" step="0.01" min="0" name="item_unitPrice_'+idx+'" value="'+(item.unitPrice||'')+'" /></div></div><div class="toolbar" style="margin-top:8px"><button type="button" class="btn danger remove-sale-item" data-index="'+idx+'">Remover item</button></div></div>';
+  }
+  function salePaymentHtml(pay, idx, accountOpts){
+    function sel(v,opt){ return String(v||'')===String(opt)?' selected':''; }
+    var type = pay.type||'dinheiro';
+    var html='<div class="card" style="margin-bottom:10px"><div class="row-3"><div><label>Tipo</label><select name="pay_type_'+idx+'">'+
+      '<option value="dinheiro"'+sel(type,'dinheiro')+'>Dinheiro</option>'+
+      '<option value="pix"'+sel(type,'pix')+'>PIX</option>'+
+      '<option value="cheque"'+sel(type,'cheque')+'>Cheque</option>'+
+      '<option value="boleto"'+sel(type,'boleto')+'>Boleto</option>'+
+      '<option value="cartao"'+sel(type,'cartao')+'>Cartão</option>'+
+    '</select></div>'+
+    '<div><label>Valor</label><input type="number" step="0.01" min="0" name="pay_value_'+idx+'" value="'+(pay.value||'')+'" /></div>';
+    if(type==='cheque') html+='<div><label>Vencimento</label><input type="date" name="pay_dueDate_'+idx+'" value="'+(pay.dueDate||'')+'" /></div></div><div class="row-3"><div><label>Número cheque</label><input name="pay_number_'+idx+'" value="'+(pay.number||'')+'" /></div><div><label>Banco</label><input name="pay_bank_'+idx+'" value="'+(pay.bank||'')+'" /></div><div><label>Emitente</label><input name="pay_emitter_'+idx+'" value="'+(pay.emitter||'')+'" /></div></div>';
+    else if(type==='boleto') html+='<div><label>Vencimento</label><input type="date" name="pay_dueDate_'+idx+'" value="'+(pay.dueDate||'')+'" /></div></div>';
+    else html+='<div><label>Conta</label><select name="pay_accountId_'+idx+'">'+accountOpts.replace('value="'+(pay.accountId||'')+'"','value="'+(pay.accountId||'')+'" selected')+'</select></div></div>';
+    html+='<div class="toolbar" style="margin-top:8px"><button type="button" class="btn danger remove-sale-pay" data-index="'+idx+'">Remover pagamento</button></div></div>';
+    return html;
+  }
+  function collectSaleForm(form){
+    var draft=saleDraft();
+    var items=[];
+    for(var i=0;i<draft.items.length;i++){
+      var productId=Number(form.elements['item_productId_'+i].value||0), qty=Number(form.elements['item_qty_'+i].value||0), unitPrice=Number(form.elements['item_unitPrice_'+i].value||0);
+      if(productId && qty>0) items.push({productId:productId, qty:qty, unitPrice:unitPrice, total:Number((qty*unitPrice).toFixed(2))});
+    }
+    var payments=[];
+    for(var j=0;j<draft.payments.length;j++){
+      var type=form.elements['pay_type_'+j].value, value=Number(form.elements['pay_value_'+j].value||0);
+      if(!value) continue;
+      var pay={type:type, value:value, accountId:Number((form.elements['pay_accountId_'+j]&&form.elements['pay_accountId_'+j].value)||0)||null, dueDate:(form.elements['pay_dueDate_'+j]&&form.elements['pay_dueDate_'+j].value)||'', number:(form.elements['pay_number_'+j]&&form.elements['pay_number_'+j].value)||'', bank:(form.elements['pay_bank_'+j]&&form.elements['pay_bank_'+j].value)||'', emitter:(form.elements['pay_emitter_'+j]&&form.elements['pay_emitter_'+j].value)||'', obs:''};
+      if(type==='cheque') pay.chequeCode = nextCode('CHQ', state.cheques);
+      payments.push(pay);
+    }
+    var total = items.reduce(function(s,x){return s+Number(x.total||0);},0);
+    var payTotal = payments.reduce(function(s,x){return s+Number(x.value||0);},0);
+    return {items:items,payments:payments,total:Number(total.toFixed(2)),payTotal:Number(payTotal.toFixed(2)),openAmount:Number((total-payTotal).toFixed(2))};
+  }
+  function refreshSaleSummary(){
+    var f=document.getElementById('form_sales'); if(!f) return;
+    var data=collectSaleForm(f);
+    var saleTotal=document.getElementById('saleTotal'), payTotal=document.getElementById('payTotal'), diffTotal=document.getElementById('diffTotal');
+    if(saleTotal) saleTotal.innerText=money(data.total);
+    if(payTotal) payTotal.innerText=money(data.payTotal);
+    if(diffTotal) diffTotal.innerText=money(data.openAmount);
+    var warn=document.getElementById('saleWarning');
+    if(warn){
+      if(data.items.length===0){ warn.classList.remove('hidden'); warn.innerText='Adicione pelo menos um item.'; }
+      else if(Math.abs(data.openAmount) > 0.009){ warn.classList.remove('hidden'); warn.innerText='A diferença entre venda e pagamentos é '+money(data.openAmount)+'.'; }
+      else { warn.classList.add('hidden'); warn.innerText=''; }
+    }
+  }
   function renderSales(){
-    var customerOpts=optionsFrom(state.customers,function(c){return c.name;});
-    var productOpts=optionsFrom(state.products,function(p){return p.name;});
+    var draft=saleDraft();
+    var customerOpts=optionsFrom(state.customers,function(c){return (c.code?c.code+' - ':'')+c.name;});
+    var productOpts=optionsFrom(state.products,function(p){return (p.code?p.code+' - ':'')+p.name;});
     var accountOpts=optionsFrom(state.accounts,function(a){return a.name;});
     var saleRows='';
     state.sales.slice().reverse().forEach(function(s){ saleRows+='<tr><td>'+(s.code||('#'+s.id))+'</td><td>'+s.date+'</td><td>'+customerName(s.customerId)+'</td><td>'+money(s.total)+'</td><td>'+money(s.openAmount||0)+'</td></tr>'; });
-    return '<div class="grid two"><div class="card"><h3>Nova venda</h3><form id="form_sales"><div class="row-2"><div><label>Cliente</label><select name="customerId">'+customerOpts+'</select></div><div><label>Data</label><input type="date" name="date" value="'+today()+'" /></div></div><div id="saleWarning" class="warning hidden" style="margin-top:10px"></div><h3 style="margin-top:16px">Itens</h3><div id="saleItems"></div><div class="toolbar"><button type="button" class="btn secondary" id="addSaleItem">+ Item</button></div><h3 style="margin-top:16px">Pagamentos</h3><div id="salePays"></div><div class="toolbar"><button type="button" class="btn secondary" id="addSalePay">+ Pagamento</button></div><div class="card" style="margin-top:12px;background:#f8fafc"><div class="row-3"><div><div class="muted">Total da venda</div><div class="kpi" id="saleTotal">R$ 0,00</div></div><div><div class="muted">Total pagamentos</div><div class="kpi" id="payTotal">R$ 0,00</div></div><div><div class="muted">Diferença</div><div class="kpi" id="diffTotal">R$ 0,00</div></div></div></div><div class="toolbar" style="margin-top:12px"><button type="submit" class="btn">Salvar venda</button></div></form></div><div class="card"><h3>Vendas</h3><table><thead><tr><th>Código</th><th>Data</th><th>Cliente</th><th>Total</th><th>Em aberto</th></tr></thead><tbody>'+saleRows+'</tbody></table></div></div>';
+    var itemsHtml='';
+    for(var i=0;i<draft.items.length;i++) itemsHtml += saleItemHtml(draft.items[i], i, productOpts);
+    var paysHtml='';
+    for(var j=0;j<draft.payments.length;j++) paysHtml += salePaymentHtml(draft.payments[j], j, accountOpts);
+    return '<div class="grid two"><div class="card"><h3>Nova venda</h3><form id="form_sales"><div class="row-2"><div><label>Cliente</label><select name="customerId">'+customerOpts+'</select></div><div><label>Data</label><input type="date" name="date" value="'+today()+'" /></div></div><label>Observação</label><input name="obs" /><div id="saleWarning" class="warning hidden" style="margin-top:10px"></div><h3 style="margin-top:16px">Itens</h3><div id="saleItems">'+itemsHtml+'</div><div class="toolbar"><button type="button" class="btn secondary" id="addSaleItem">+ Item</button></div><h3 style="margin-top:16px">Pagamentos</h3><div id="salePays">'+paysHtml+'</div><div class="toolbar"><button type="button" class="btn secondary" id="addSalePay">+ Pagamento</button></div><div class="card" style="margin-top:12px;background:#f8fafc"><div class="row-3"><div><div class="muted">Total da venda</div><div class="kpi" id="saleTotal">R$ 0,00</div></div><div><div class="muted">Total pagamentos</div><div class="kpi" id="payTotal">R$ 0,00</div></div><div><div class="muted">Diferença</div><div class="kpi" id="diffTotal">R$ 0,00</div></div></div></div><div class="toolbar" style="margin-top:12px"><button type="submit" class="btn">Salvar venda</button></div></form></div><div class="card"><h3>Vendas</h3><table><thead><tr><th>Código</th><th>Data</th><th>Cliente</th><th>Total</th><th>Em aberto</th></tr></thead><tbody>'+saleRows+'</tbody></table></div></div>';
   }
   function renderCheques(){
     var rows='';
@@ -430,6 +493,51 @@
     };
   }
   function bindProducts(){ var f=document.getElementById('form_products'); if(!f) return; f.onsubmit=async function(e){e.preventDefault(); var cost=Number(f.elements.cost.value||0), salePrice=Number(f.elements.salePrice.value||0); try{ var code=nextCode('PRO',state.products); await apiPost('/produtos',{ codigo: code, nome:f.elements.name.value, tipo:f.elements.type.value, unidade:'kg' }); await syncRemoteCadastros(); var p=null; for(var i=0;i<state.products.length;i++){ if(state.products[i].code===code){ p=state.products[i]; break; } } if(p){ p.cost=cost; p.avgCost=cost; p.salePrice=salePrice; p.stock=Number(p.stock||0); p.purchaseQtyTotal=Number(p.purchaseQtyTotal||0); p.purchaseValueTotal=Number(p.purchaseValueTotal||0); } save(); render(); }catch(err){ alert(err.message||'Erro ao salvar produto.'); } }; }
+
+  function bindSales(){
+    var f=document.getElementById('form_sales');
+    if(!f) return;
+    refreshSaleSummary();
+    var watch=f.querySelectorAll('input,select');
+    for(var w=0; w<watch.length; w++) watch[w].oninput=watch[w].onchange=refreshSaleSummary;
+    var addItem=document.getElementById('addSaleItem');
+    if(addItem) addItem.onclick=function(){ saleDraft().items.push({productId:'',qty:'',unitPrice:''}); render(); setPage('sales'); };
+    var addPay=document.getElementById('addSalePay');
+    if(addPay) addPay.onclick=function(){ saleDraft().payments.push({type:'dinheiro',value:'',accountId:'1',dueDate:'',number:'',bank:'',emitter:''}); render(); setPage('sales'); };
+    var remItems=document.querySelectorAll('.remove-sale-item');
+    for(var i=0;i<remItems.length;i++) remItems[i].onclick=function(){ var idx=Number(this.getAttribute('data-index')); saleDraft().items.splice(idx,1); if(!saleDraft().items.length) saleDraft().items.push({productId:'',qty:'',unitPrice:''}); render(); setPage('sales'); };
+    var remPays=document.querySelectorAll('.remove-sale-pay');
+    for(var j=0;j<remPays.length;j++) remPays[j].onclick=function(){ var idx=Number(this.getAttribute('data-index')); saleDraft().payments.splice(idx,1); if(!saleDraft().payments.length) saleDraft().payments.push({type:'dinheiro',value:'',accountId:'1'}); render(); setPage('sales'); };
+    f.onsubmit=async function(e){
+      e.preventDefault();
+      var customerId=Number(f.elements.customerId.value||0);
+      if(!customerId) return alert('Selecione o cliente.');
+      var data=collectSaleForm(f);
+      if(!data.items.length) return alert('Adicione pelo menos um item.');
+      if(Math.abs(data.openAmount) > 0.009) return alert('A soma dos pagamentos precisa bater com o total da venda.');
+      try{
+        await apiPost('/vendas',{ codigo: nextCode('VEN', state.sales), customerId: customerId, date: f.elements.date.value, total: data.total, openAmount: 0, obs: f.elements.obs.value||'', items: data.items, payments: data.payments });
+        for(var a=0;a<data.items.length;a++){
+          var it=data.items[a], prod=byId(state.products,it.productId);
+          if(prod){ prod.stock=Math.max(0, Number(prod.stock||0)-Number(it.qty||0)); }
+          state.stockMoves.push({id:nextId(state.stockMoves),productId:it.productId,type:'saida',origin:'venda',qty:it.qty,cost:it.unitPrice,date:f.elements.date.value});
+        }
+        for(var b=0;b<data.payments.length;b++){
+          var p=data.payments[b];
+          if((p.type==='dinheiro' || p.type==='pix' || p.type==='cartao') && p.accountId){
+            state.finance.push({id:nextId(state.finance),type:'entrada',category:'venda',partyName:customerName(customerId),accountId:Number(p.accountId),date:f.elements.date.value,value:Number(p.value||0),origin:'venda'});
+          } else if(p.type==='boleto'){
+            state.receivables.push({id:nextId(state.receivables), code: nextCode('REC', state.receivables), customerId:customerId, partyName:customerName(customerId), category:'boleto venda', originalValue:Number(p.value||0), openValue:Number(p.value||0), date:p.dueDate||f.elements.date.value, status:'aberto', origin:'venda'});
+          }
+        }
+        uiState.saleDraft=null;
+        await syncRemoteCadastros();
+        save();
+        alert('Venda salva com sucesso.');
+        render(); setPage('sales');
+      }catch(err){ alert(err.message||'Erro ao salvar venda.'); }
+    };
+  }
 
   function bindPurchases(){
     var f=document.getElementById('form_purchases');
