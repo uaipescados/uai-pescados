@@ -84,7 +84,7 @@
     {id:'principal', title:'Principal', items:[['dashboard','Dashboard'],['sales','Vendas'],['cheques','Cheques'],['borders','Antecipações'],['stock','Estoque']]},
     {id:'cadastros', title:'Cadastros', items:[['customers','Clientes'],['suppliers','Fornecedores'],['employees','Funcionários'],['institutions','Instituições'],['products','Produtos']]},
     {id:'producao', title:'Produção', items:[['production','Lotes e Produções'],['purchases','Entrada Mercadoria']]},
-    {id:'financeiro', title:'Financeiro', items:[['finance','Lançamentos'],['receivables','Contas a Receber'],['payables','Contas a Pagar'],['transfers','Transferências']]}
+    {id:'financeiro', title:'Financeiro', items:[['finance','Lançamentos'],['receivables','Contas a Receber'],['payables','Contas a Pagar'],['transfers','Transferências'],['reports','Relatórios']]}
   ];
   var menuOpenState={principal:true,cadastros:false,producao:false,financeiro:false};
   var uiState={receivableSettleId:null,payableSettleId:null,editingCustomerId:null,editingSupplierId:null,editingEmployeeId:null,editingInstitutionId:null,editingProductId:null,editingSaleId:null};
@@ -98,7 +98,7 @@
     }
   })();
 
-  var pageTitles={dashboard:'Dashboard',customers:'Clientes',suppliers:'Fornecedores',employees:'Funcionários',institutions:'Instituições',products:'Produtos',sales:'Vendas',cheques:'Cheques',borders:'Antecipações',finance:'Lançamentos',production:'Lotes e Produções',purchases:'Entrada Mercadoria',stock:'Estoque',receivables:'Contas a Receber',payables:'Contas a Pagar',transfers:'Transferências'};
+  var pageTitles={dashboard:'Dashboard',customers:'Clientes',suppliers:'Fornecedores',employees:'Funcionários',institutions:'Instituições',products:'Produtos',sales:'Vendas',cheques:'Cheques',borders:'Antecipações',finance:'Financeiro Completo',production:'Lotes e Produções',purchases:'Entrada Mercadoria',stock:'Estoque Profissional',receivables:'Contas a Receber',payables:'Contas a Pagar',transfers:'Transferências',reports:'Relatórios Gerenciais'};
   function clone(obj){return JSON.parse(JSON.stringify(obj));}
   function load(){ try{ var s=localStorage.getItem(KEY); return s?JSON.parse(s):clone(defaultState);}catch(e){ return clone(defaultState);} }
   function save(){ localStorage.setItem(KEY, JSON.stringify(state)); }
@@ -230,6 +230,75 @@
       acc.balance += (f.type==='entrada'?1:-1)*Number(f.value||0);
     }
   }
+
+  function productMetrics(){
+    var list = state.products.map(function(p){
+      var salePrice = Number(p.salePrice||0);
+      var avgCost = Number(p.avgCost||p.cost||0);
+      var stock = Number(p.stock||0);
+      var revenuePotential = stock * salePrice;
+      var stockCost = stock * avgCost;
+      var grossProfit = revenuePotential - stockCost;
+      var marginPct = salePrice ? ((salePrice - avgCost) / salePrice) * 100 : 0;
+      return {
+        id:p.id, code:p.code||'', name:p.name, type:p.type||'', stock:stock,
+        avgCost:avgCost, salePrice:salePrice, stockCost:stockCost,
+        revenuePotential:revenuePotential, grossProfit:grossProfit, marginPct:marginPct
+      };
+    });
+    list.sort(function(a,b){ return b.stockCost - a.stockCost; });
+    return list;
+  }
+  function financeSummary(){
+    var entrada=0, saida=0, receber=0, pagar=0, vencidoReceber=0, vencidoPagar=0;
+    var todayStr=today();
+    state.finance.forEach(function(f){
+      if(f.type==='entrada') entrada += Number(f.value||0);
+      else saida += Number(f.value||0);
+    });
+    state.receivables.forEach(function(r){
+      var open = Number(r.openValue||0);
+      if(open>0){ receber += open; if(String(r.date||'') < todayStr) vencidoReceber += open; }
+    });
+    state.payables.forEach(function(p){
+      var open = Number(p.openValue||0);
+      if(open>0){ pagar += open; if(String(p.date||'') < todayStr) vencidoPagar += open; }
+    });
+    var saldoContas=0; state.accounts.forEach(function(a){ saldoContas += Number(a.balance||0); });
+    return {
+      entrada:entrada, saida:saida, saldoPeriodo:entrada-saida, saldoContas:saldoContas,
+      receber:receber, pagar:pagar, projetado:saldoContas+receber-pagar,
+      vencidoReceber:vencidoReceber, vencidoPagar:vencidoPagar
+    };
+  }
+  function monthlyFinanceRows(){
+    var bucket={};
+    state.finance.forEach(function(f){
+      var key=String(f.date||today()).slice(0,7);
+      if(!bucket[key]) bucket[key]={month:key, entrada:0, saida:0};
+      if(f.type==='entrada') bucket[key].entrada += Number(f.value||0);
+      else bucket[key].saida += Number(f.value||0);
+    });
+    return Object.keys(bucket).sort().reverse().map(function(k){
+      var x=bucket[k]; x.resultado=x.entrada-x.saida; return x;
+    });
+  }
+  function salesProfitRows(){
+    var prodMap={}; productMetrics().forEach(function(p){ prodMap[p.id]=p; });
+    return state.sales.slice().map(function(s){
+      var revenue=Number(s.total||0), realCost=0;
+      (s.items||[]).forEach(function(it){
+        var pm=prodMap[Number(it.productId)||0];
+        realCost += Number(it.qty||0) * Number(pm ? pm.avgCost : 0);
+      });
+      var profit = revenue - realCost;
+      var margin = revenue ? (profit / revenue) * 100 : 0;
+      return { id:s.id, code:s.code||'', date:s.date||'', customer:customerName(s.customerId)||'', revenue:revenue, realCost:realCost, profit:profit, margin:margin };
+    }).sort(function(a,b){ return b.profit - a.profit; });
+  }
+  function topDebtors(limit){
+    return state.receivables.slice().filter(function(r){ return Number(r.openValue||0)>0; }).sort(function(a,b){ return Number(b.openValue||0)-Number(a.openValue||0); }).slice(0,limit||10);
+  }
   function closeMenu(){ document.getElementById('app').classList.remove('menu-open'); }
   function openMenu(){ document.getElementById('app').classList.add('menu-open'); }
   function setPage(name){ current=name; render(); closeMenu(); }
@@ -272,23 +341,30 @@
     var pages={
       dashboard:renderDashboard, customers:renderCustomers, suppliers:renderSuppliers, employees:renderEmployees, institutions:renderInstitutions,
       products:renderProducts, sales:renderSales, cheques:renderCheques, borders:renderBorders, finance:renderFinance,
-      production:renderProduction, purchases:renderPurchases, stock:renderStock, receivables:renderReceivables, payables:renderPayables, transfers:renderTransfers
+      production:renderProduction, purchases:renderPurchases, stock:renderStock, receivables:renderReceivables, payables:renderPayables, transfers:renderTransfers, reports:renderReports
     };
     v.innerHTML = pages[current](); bindPage();
   }
 
   function renderDashboard(){
     var recv=0,pay=0,cheq=0; state.receivables.forEach(function(r){recv+=Number(r.openValue||0)}); state.payables.forEach(function(p){pay+=Number(p.openValue||0)}); state.cheques.forEach(function(c){ if(c.status==='em carteira') cheq+=Number(c.value||0); });
-    var total=0; state.accounts.forEach(function(a){ total+=Number(a.balance||0); });
+    var fin=financeSummary();
+    var metrics=productMetrics();
+    var stockValue=0, potential=0, profitPotential=0;
+    metrics.forEach(function(m){ stockValue += m.stockCost; potential += m.revenuePotential; profitPotential += m.grossProfit; });
     return '<div class="grid cards">'+
-      card('Caixa',money(byId(state.accounts,1).balance))+
-      card('Uai Sicoob',money(byId(state.accounts,2).balance))+
-      card('Uai Itaú',money(byId(state.accounts,3).balance))+
-      card('HM Itaú',money(byId(state.accounts,4).balance))+
-      card('Total em contas',money(total))+
-      card('Cheques em carteira',money(cheq))+
+      card('Saldo em contas',money(fin.saldoContas))+
+      card('Receitas lançadas',money(fin.entrada))+
+      card('Despesas lançadas',money(fin.saida))+
+      card('Resultado do período',money(fin.saldoPeriodo))+
       card('Contas a receber',money(recv))+
       card('Contas a pagar',money(pay))+
+      card('Cheques em carteira',money(cheq))+
+      card('Saldo projetado',money(fin.projetado))+
+      card('Estoque a custo',money(stockValue))+
+      card('Receita potencial do estoque',money(potential))+
+      card('Lucro potencial do estoque',money(profitPotential))+
+      card('Receber vencido',money(fin.vencidoReceber))+
       '</div>';
   }
 
@@ -472,7 +548,21 @@
   function renderFinance(){
     var accOpts=optionsFrom(state.accounts,function(a){return a.name;});
     var rows=''; state.finance.slice().reverse().forEach(function(f){ rows+='<tr><td>'+f.date+'</td><td>'+f.type+'</td><td>'+f.category+'</td><td>'+(f.partyName||'')+'</td><td>'+accountName(f.accountId)+'</td><td>'+money(f.value)+'</td></tr>'; });
-    return '<div class="grid two"><div class="card"><h3>Novo lançamento</h3><form id="form_finance"><div class="row-2"><div><label>Tipo</label><select name="type"><option value="entrada">entrada</option><option value="saida">saída</option></select></div><div><label>Data</label><input type="date" name="date" value="'+today()+'" /></div><div><label>Categoria</label><input name="category" /></div><div><label>Favorecido</label><input name="partyName" /></div><div><label>Conta</label><select name="accountId">'+accOpts+'</select></div><div><label>Valor</label><input type="number" step="0.01" name="value" /></div></div><div class="toolbar" style="margin-top:12px"><button type="submit" class="btn">Salvar</button></div></form></div><div class="card"><h3>Lançamentos</h3><table><thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Favorecido</th><th>Conta</th><th>Valor</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+    var fin=financeSummary();
+    var accountRows=''; state.accounts.forEach(function(a){ accountRows += '<tr><td>'+a.name+'</td><td>'+money(a.balance||0)+'</td></tr>'; });
+    var monthRows=''; monthlyFinanceRows().slice(0,12).forEach(function(m){ monthRows += '<tr><td>'+m.month+'</td><td>'+money(m.entrada)+'</td><td>'+money(m.saida)+'</td><td>'+money(m.resultado)+'</td></tr>'; });
+    return '<div class="grid cards">'+
+      card('Saldo em contas',money(fin.saldoContas))+
+      card('Entradas',money(fin.entrada))+
+      card('Saídas',money(fin.saida))+
+      card('Resultado',money(fin.saldoPeriodo))+
+      card('A receber',money(fin.receber))+
+      card('A pagar',money(fin.pagar))+
+      card('Saldo projetado',money(fin.projetado))+
+      card('Pagar vencido',money(fin.vencidoPagar))+
+      '</div>'+
+      '<div class="grid two"><div class="card"><h3>Novo lançamento</h3><form id="form_finance"><div class="row-2"><div><label>Tipo</label><select name="type"><option value="entrada">entrada</option><option value="saida">saída</option></select></div><div><label>Data</label><input type="date" name="date" value="'+today()+'" /></div><div><label>Categoria</label><input name="category" /></div><div><label>Favorecido</label><input name="partyName" /></div><div><label>Conta</label><select name="accountId">'+accOpts+'</select></div><div><label>Valor</label><input type="number" step="0.01" name="value" /></div></div><div class="toolbar" style="margin-top:12px"><button type="submit" class="btn">Salvar</button></div></form></div><div class="card"><h3>Saldos por conta</h3><table><thead><tr><th>Conta</th><th>Saldo</th></tr></thead><tbody>'+accountRows+'</tbody></table></div></div>'+
+      '<div class="grid two"><div class="card"><h3>Fluxo mensal</h3><table><thead><tr><th>Mês</th><th>Entradas</th><th>Saídas</th><th>Resultado</th></tr></thead><tbody>'+monthRows+'</tbody></table></div><div class="card"><h3>Lançamentos</h3><table><thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Favorecido</th><th>Conta</th><th>Valor</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
   }
   function renderProduction(){
     var suppOpts=optionsFrom(state.suppliers,function(s){return s.name;});
@@ -496,8 +586,25 @@
     return '<div class="grid two"><div class="card"><h3>Nova produção</h3><form id="form_production"><div class="row-2"><div><label>Lote</label><select name="lotId">'+lotOpts+'</select></div><div><label>Prestador</label><select name="provider"><option>Prestador 1</option><option>Prestador 2</option></select></div><div><label>Data</label><input type="date" name="date" value="'+today()+'" /></div></div><div id="productionItems"></div><div class="toolbar"><button type="button" class="btn secondary" id="addProductionItem">+ Produto produzido</button></div><div class="toolbar" style="margin-top:12px"><button type="submit" class="btn">Salvar produção</button></div></form><div class="hidden" id="prodProductOptions">'+prodOpts+'</div></div><div class="card"><h3>Produções</h3><table><thead><tr><th>Nº</th><th>Data</th><th>Lote</th><th>Prestador</th><th>Total kg</th><th>Custo</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
   }
   function renderStock(){
-    var rows=''; state.products.forEach(function(p){ rows+='<tr><td>'+p.name+'</td><td>'+p.type+'</td><td>'+Number(p.stock||0).toFixed(2)+' kg</td><td>'+money((p.avgCost||p.cost||0))+'</td></tr>'; });
-    return '<div class="card"><h3>Estoque</h3><table><thead><tr><th>Produto</th><th>Tipo</th><th>Saldo</th><th>Custo</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+    var metrics=productMetrics();
+    var rows=''; metrics.forEach(function(p){ rows+='<tr><td>'+(p.code||'')+'</td><td>'+p.name+'</td><td>'+p.type+'</td><td>'+Number(p.stock||0).toFixed(2)+' kg</td><td>'+money(p.avgCost)+'</td><td>'+money(p.salePrice)+'</td><td>'+money(p.stockCost)+'</td><td>'+money(p.grossProfit)+'</td><td>'+Number(p.marginPct||0).toFixed(1)+'%</td></tr>'; });
+    var lotRows=''; state.lots.slice().reverse().forEach(function(l){ lotRows += '<tr><td>'+(l.code||('#'+l.id))+'</td><td>'+supplierName(l.supplierId)+'</td><td>'+Number(l.qtyKg||0).toFixed(2)+' kg</td><td>'+money(l.totalCost||0)+'</td><td>'+l.status+'</td></tr>'; });
+    var totalCost=0,totalPotential=0,totalProfit=0; metrics.forEach(function(m){ totalCost+=m.stockCost; totalPotential+=m.revenuePotential; totalProfit+=m.grossProfit; });
+    return '<div class="grid cards">'+
+      card('Estoque a custo',money(totalCost))+
+      card('Receita potencial',money(totalPotential))+
+      card('Lucro potencial',money(totalProfit))+
+      card('Produtos em estoque',String(metrics.filter(function(m){return m.stock>0;}).length))+
+      '</div>'+
+      '<div class="grid two"><div class="card"><h3>Estoque por produto</h3><table><thead><tr><th>Código</th><th>Produto</th><th>Tipo</th><th>Saldo</th><th>Custo médio</th><th>Venda</th><th>Valor estoque</th><th>Lucro potencial</th><th>Margem</th></tr></thead><tbody>'+rows+'</tbody></table></div><div class="card"><h3>Saldo por lote</h3><table><thead><tr><th>Lote</th><th>Fornecedor</th><th>Quantidade</th><th>Custo total</th><th>Status</th></tr></thead><tbody>'+lotRows+'</tbody></table></div></div>';
+  }
+  function renderReports(){
+    var sales=salesProfitRows();
+    var salesRows=''; sales.slice(0,20).forEach(function(s){ salesRows += '<tr><td>'+(s.code||'')+'</td><td>'+s.date+'</td><td>'+s.customer+'</td><td>'+money(s.revenue)+'</td><td>'+money(s.realCost)+'</td><td>'+money(s.profit)+'</td><td>'+Number(s.margin||0).toFixed(1)+'%</td></tr>'; });
+    var debtorRows=''; topDebtors(15).forEach(function(r){ debtorRows += '<tr><td>'+(r.code||'')+'</td><td>'+(r.partyName||customerName(r.customerId))+'</td><td>'+(r.date||'')+'</td><td>'+money(r.openValue||0)+'</td></tr>'; });
+    var chequeStatus={}; state.cheques.forEach(function(c){ chequeStatus[c.status||'sem status']=(chequeStatus[c.status||'sem status']||0)+Number(c.value||0); });
+    var chequeRows=''; Object.keys(chequeStatus).forEach(function(k){ chequeRows += '<tr><td>'+k+'</td><td>'+money(chequeStatus[k])+'</td></tr>'; });
+    return '<div class="grid two"><div class="card"><h3>Vendas com custo real e lucro</h3><table><thead><tr><th>Código</th><th>Data</th><th>Cliente</th><th>Receita</th><th>Custo real</th><th>Lucro líquido</th><th>Margem</th></tr></thead><tbody>'+salesRows+'</tbody></table></div><div class="card"><h3>Clientes devedores</h3><table><thead><tr><th>Código</th><th>Cliente</th><th>Vencimento</th><th>Em aberto</th></tr></thead><tbody>'+debtorRows+'</tbody></table><h3 style="margin-top:18px">Cheques por status</h3><table><thead><tr><th>Status</th><th>Valor</th></tr></thead><tbody>'+chequeRows+'</tbody></table></div></div>';
   }
   function renderReceivables(){
     var customerOpts=optionsFrom(state.customers,function(c){return (c.code?c.code+' - ':'')+c.name;});
