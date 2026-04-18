@@ -87,7 +87,7 @@
     {id:'financeiro', title:'Financeiro', items:[['finance','Lançamentos'],['receivables','Contas a Receber'],['payables','Contas a Pagar'],['transfers','Transferências'],['reports','Relatórios']]}
   ];
   var menuOpenState={principal:true,cadastros:false,producao:false,financeiro:false};
-  var uiState={receivableSettleId:null,payableSettleId:null,editingCustomerId:null,editingSupplierId:null,editingEmployeeId:null,editingInstitutionId:null,editingProductId:null,editingSaleId:null};
+  var uiState={receivableSettleId:null,payableSettleId:null,editingCustomerId:null,editingSupplierId:null,editingEmployeeId:null,editingInstitutionId:null,editingProductId:null,editingSaleId:null,financeType:'entrada',stockStartDate:'',stockEndDate:'',financeStartDate:'',financeEndDate:'',financeMonth:'',financeYear:'',reportStartDate:'',reportEndDate:''};
 
   // garante códigos nos cadastros antigos
   (function ensureCodes(){
@@ -178,6 +178,37 @@
   function byId(arr,id){ for(var i=0;i<arr.length;i++){ if(Number(arr[i].id)===Number(id)) return arr[i]; } return null; }
   function money(v){ var n=Number(v||0); return n.toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
   function today(){ return new Date().toISOString().slice(0,10); }
+  function inDateRange(dateValue, startDate, endDate){
+    var d = String(dateValue||'').slice(0,10);
+    if(!d) return false;
+    if(startDate && d < startDate) return false;
+    if(endDate && d > endDate) return false;
+    return true;
+  }
+  function monthYearFilter(monthValue, yearValue){
+    return function(dateValue){
+      var d = String(dateValue||'').slice(0,10);
+      if(!d) return false;
+      if(monthValue && d.slice(5,7)!==String(monthValue).padStart(2,'0')) return false;
+      if(yearValue && d.slice(0,4)!==String(yearValue)) return false;
+      return true;
+    };
+  }
+  function reportRangeMatch(dateValue){
+    return inDateRange(dateValue, uiState.reportStartDate, uiState.reportEndDate);
+  }
+  function stockRangeMatch(dateValue){
+    return inDateRange(dateValue, uiState.stockStartDate, uiState.stockEndDate);
+  }
+  function financeRangeMatch(dateValue){
+    return inDateRange(dateValue, uiState.financeStartDate, uiState.financeEndDate);
+  }
+  function yearsFromFinance(){
+    var set={}; state.finance.forEach(function(f){ var y=String(f.date||'').slice(0,4); if(y) set[y]=true; });
+    var years=Object.keys(set).sort().reverse();
+    if(!years.length) years=[String(new Date().getFullYear())];
+    return years;
+  }
   function accountName(id){ var a=byId(state.accounts,id); return a?a.name:''; }
   function customerName(id){ var c=byId(state.customers,id); return c?c.name:''; }
   function supplierName(id){ var s=byId(state.suppliers,id); return s?s.name:''; }
@@ -231,11 +262,29 @@
     }
   }
 
-  function productMetrics(){
+  function productMetricsFiltered(startDate, endDate){
+    var purchaseTotals = {}, stockTotals = {};
+    state.purchases.forEach(function(p){
+      if(inDateRange(p.date, startDate, endDate)){
+        var key=Number(p.productId||0);
+        if(!purchaseTotals[key]) purchaseTotals[key]={qty:0,val:0};
+        purchaseTotals[key].qty += Number(p.qty||0);
+        purchaseTotals[key].val += Number(p.totalValue||0);
+      }
+    });
+    state.stockMoves.forEach(function(m){
+      if(inDateRange(m.date, startDate, endDate)){
+        var key=Number(m.productId||0);
+        if(!stockTotals[key]) stockTotals[key]=0;
+        stockTotals[key] += (m.type==='entrada'?1:-1)*Number(m.qty||0);
+      }
+    });
     var list = state.products.map(function(p){
+      var key=Number(p.id||0);
+      var pt = purchaseTotals[key] || {qty:0,val:0};
       var salePrice = Number(p.salePrice||0);
-      var avgCost = Number(p.avgCost||p.cost||0);
-      var stock = Number(p.stock||0);
+      var avgCost = pt.qty ? (pt.val / pt.qty) : Number(p.avgCost||p.cost||0);
+      var stock = Math.max(0, Number(stockTotals[key]||0));
       var revenuePotential = stock * salePrice;
       var stockCost = stock * avgCost;
       var grossProfit = revenuePotential - stockCost;
@@ -248,6 +297,9 @@
     });
     list.sort(function(a,b){ return b.stockCost - a.stockCost; });
     return list;
+  }
+  function productMetrics(){
+    return productMetricsFiltered('', '');
   }
   function financeSummary(){
     var entrada=0, saida=0, receber=0, pagar=0, vencidoReceber=0, vencidoPagar=0;
@@ -283,9 +335,9 @@
       var x=bucket[k]; x.resultado=x.entrada-x.saida; return x;
     });
   }
-  function salesProfitRows(){
-    var prodMap={}; productMetrics().forEach(function(p){ prodMap[p.id]=p; });
-    return state.sales.slice().map(function(s){
+  function salesProfitRowsFiltered(startDate, endDate){
+    var prodMap={}; productMetricsFiltered(startDate, endDate).forEach(function(p){ prodMap[p.id]=p; });
+    return state.sales.slice().filter(function(s){ return inDateRange(s.date, startDate, endDate); }).map(function(s){
       var revenue=Number(s.total||0), realCost=0;
       (s.items||[]).forEach(function(it){
         var pm=prodMap[Number(it.productId)||0];
@@ -296,8 +348,14 @@
       return { id:s.id, code:s.code||'', date:s.date||'', customer:customerName(s.customerId)||'', revenue:revenue, realCost:realCost, profit:profit, margin:margin };
     }).sort(function(a,b){ return b.profit - a.profit; });
   }
+  function salesProfitRows(){
+    return salesProfitRowsFiltered('', '');
+  }
   function topDebtors(limit){
     return state.receivables.slice().filter(function(r){ return Number(r.openValue||0)>0; }).sort(function(a,b){ return Number(b.openValue||0)-Number(a.openValue||0); }).slice(0,limit||10);
+  }
+  function topDebtorsFiltered(limit, startDate, endDate){
+    return state.receivables.slice().filter(function(r){ return Number(r.openValue||0)>0 && inDateRange(r.date, startDate, endDate); }).sort(function(a,b){ return Number(b.openValue||0)-Number(a.openValue||0); }).slice(0,limit||10);
   }
   function closeMenu(){ document.getElementById('app').classList.remove('menu-open'); }
   function openMenu(){ document.getElementById('app').classList.add('menu-open'); }
@@ -547,10 +605,18 @@
   }
   function renderFinance(){
     var accOpts=optionsFrom(state.accounts,function(a){return a.name;});
-    var rows=''; state.finance.slice().reverse().forEach(function(f){ rows+='<tr><td>'+f.date+'</td><td>'+f.type+'</td><td>'+f.category+'</td><td>'+(f.partyName||'')+'</td><td>'+accountName(f.accountId)+'</td><td>'+money(f.value)+'</td></tr>'; });
+    var years = yearsFromFinance();
+    var yearOpts='<option value="">Todos</option>'; years.forEach(function(y){ yearOpts+='<option value="'+y+'"'+(String(uiState.financeYear||'')===String(y)?' selected':'')+'>'+y+'</option>'; });
+    var partyLabel = uiState.financeType==='saida' ? 'Fornecedor' : 'Cliente';
+    var partyOpts = uiState.financeType==='saida'
+      ? optionsFrom(state.suppliers,function(s){return (s.code?s.code+' - ':'')+s.name;})
+      : optionsFrom(state.customers,function(c){return (c.code?c.code+' - ':'')+c.name;});
+    var filteredRows = state.finance.filter(function(f){ return financeRangeMatch(f.date); });
+    var rows=''; filteredRows.slice().reverse().forEach(function(f){ rows+='<tr><td>'+f.date+'</td><td>'+f.type+'</td><td>'+f.category+'</td><td>'+(f.partyName||'')+'</td><td>'+accountName(f.accountId)+'</td><td>'+money(f.value)+'</td></tr>'; });
     var fin=financeSummary();
     var accountRows=''; state.accounts.forEach(function(a){ accountRows += '<tr><td>'+a.name+'</td><td>'+money(a.balance||0)+'</td></tr>'; });
-    var monthRows=''; monthlyFinanceRows().slice(0,12).forEach(function(m){ monthRows += '<tr><td>'+m.month+'</td><td>'+money(m.entrada)+'</td><td>'+money(m.saida)+'</td><td>'+money(m.resultado)+'</td></tr>'; });
+    var monthMatcher = monthYearFilter(uiState.financeMonth, uiState.financeYear);
+    var monthRows=''; monthlyFinanceRows().filter(function(m){ return monthMatcher(m.month+'-01'); }).forEach(function(m){ monthRows += '<tr><td>'+m.month+'</td><td>'+money(m.entrada)+'</td><td>'+money(m.saida)+'</td><td>'+money(m.resultado)+'</td></tr>'; });
     return '<div class="grid cards">'+
       card('Saldo em contas',money(fin.saldoContas))+
       card('Entradas',money(fin.entrada))+
@@ -561,8 +627,8 @@
       card('Saldo projetado',money(fin.projetado))+
       card('Pagar vencido',money(fin.vencidoPagar))+
       '</div>'+
-      '<div class="grid two"><div class="card"><h3>Novo lançamento</h3><form id="form_finance"><div class="row-2"><div><label>Tipo</label><select name="type"><option value="entrada">entrada</option><option value="saida">saída</option></select></div><div><label>Data</label><input type="date" name="date" value="'+today()+'" /></div><div><label>Categoria</label><input name="category" /></div><div><label>Favorecido</label><input name="partyName" /></div><div><label>Conta</label><select name="accountId">'+accOpts+'</select></div><div><label>Valor</label><input type="number" step="0.01" name="value" /></div></div><div class="toolbar" style="margin-top:12px"><button type="submit" class="btn">Salvar</button></div></form></div><div class="card"><h3>Saldos por conta</h3><table><thead><tr><th>Conta</th><th>Saldo</th></tr></thead><tbody>'+accountRows+'</tbody></table></div></div>'+
-      '<div class="grid two"><div class="card"><h3>Fluxo mensal</h3><table><thead><tr><th>Mês</th><th>Entradas</th><th>Saídas</th><th>Resultado</th></tr></thead><tbody>'+monthRows+'</tbody></table></div><div class="card"><h3>Lançamentos</h3><table><thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Favorecido</th><th>Conta</th><th>Valor</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+      '<div class="grid two"><div class="card"><h3>Novo lançamento</h3><form id="form_finance"><div class="row-2"><div><label>Tipo</label><select name="type"><option value="entrada"'+(uiState.financeType==='entrada'?' selected':'')+'>entrada</option><option value="saida"'+(uiState.financeType==='saida'?' selected':'')+'>saída</option></select></div><div><label>Data</label><input type="date" name="date" value="'+today()+'" /></div><div><label>Categoria</label><input name="category" /></div><div><label>'+partyLabel+'</label><select name="partyId">'+partyOpts+'</select></div><div><label>Conta</label><select name="accountId">'+accOpts+'</select></div><div><label>Valor</label><input type="number" step="0.01" name="value" /></div></div><div class="toolbar" style="margin-top:12px"><button type="submit" class="btn">Salvar</button></div></form></div><div class="card"><h3>Saldos por conta</h3><table><thead><tr><th>Conta</th><th>Saldo</th></tr></thead><tbody>'+accountRows+'</tbody></table></div></div>'+
+      '<div class="grid two"><div class="card"><h3>Fluxo mensal</h3><form id="form_finance_flow_filter"><div class="row-3"><div><label>Mês</label><select name="month"><option value="">Todos</option><option value="01"'+(uiState.financeMonth==='01'?' selected':'')+'>01</option><option value="02"'+(uiState.financeMonth==='02'?' selected':'')+'>02</option><option value="03"'+(uiState.financeMonth==='03'?' selected':'')+'>03</option><option value="04"'+(uiState.financeMonth==='04'?' selected':'')+'>04</option><option value="05"'+(uiState.financeMonth==='05'?' selected':'')+'>05</option><option value="06"'+(uiState.financeMonth==='06'?' selected':'')+'>06</option><option value="07"'+(uiState.financeMonth==='07'?' selected':'')+'>07</option><option value="08"'+(uiState.financeMonth==='08'?' selected':'')+'>08</option><option value="09"'+(uiState.financeMonth==='09'?' selected':'')+'>09</option><option value="10"'+(uiState.financeMonth==='10'?' selected':'')+'>10</option><option value="11"'+(uiState.financeMonth==='11'?' selected':'')+'>11</option><option value="12"'+(uiState.financeMonth==='12'?' selected':'')+'>12</option></select></div><div><label>Ano</label><select name="year">'+yearOpts+'</select></div><div style="display:flex;align-items:end"><button type="submit" class="btn secondary">Filtrar</button></div></div></form><table><thead><tr><th>Mês</th><th>Entradas</th><th>Saídas</th><th>Resultado</th></tr></thead><tbody>'+monthRows+'</tbody></table></div><div class="card"><h3>Lançamentos</h3><form id="form_finance_filter"><div class="row-3"><div><label>Data inicial</label><input type="date" name="startDate" value="'+(uiState.financeStartDate||'')+'" /></div><div><label>Data final</label><input type="date" name="endDate" value="'+(uiState.financeEndDate||'')+'" /></div><div style="display:flex;align-items:end"><button type="submit" class="btn secondary">Filtrar</button></div></div></form><table><thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Favorecido</th><th>Conta</th><th>Valor</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
   }
   function renderProduction(){
     var suppOpts=optionsFrom(state.suppliers,function(s){return s.name;});
@@ -586,25 +652,27 @@
     return '<div class="grid two"><div class="card"><h3>Nova produção</h3><form id="form_production"><div class="row-2"><div><label>Lote</label><select name="lotId">'+lotOpts+'</select></div><div><label>Prestador</label><select name="provider"><option>Prestador 1</option><option>Prestador 2</option></select></div><div><label>Data</label><input type="date" name="date" value="'+today()+'" /></div></div><div id="productionItems"></div><div class="toolbar"><button type="button" class="btn secondary" id="addProductionItem">+ Produto produzido</button></div><div class="toolbar" style="margin-top:12px"><button type="submit" class="btn">Salvar produção</button></div></form><div class="hidden" id="prodProductOptions">'+prodOpts+'</div></div><div class="card"><h3>Produções</h3><table><thead><tr><th>Nº</th><th>Data</th><th>Lote</th><th>Prestador</th><th>Total kg</th><th>Custo</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
   }
   function renderStock(){
-    var metrics=productMetrics();
+    var metrics=productMetricsFiltered(uiState.stockStartDate, uiState.stockEndDate);
     var rows=''; metrics.forEach(function(p){ rows+='<tr><td>'+(p.code||'')+'</td><td>'+p.name+'</td><td>'+p.type+'</td><td>'+Number(p.stock||0).toFixed(2)+' kg</td><td>'+money(p.avgCost)+'</td><td>'+money(p.salePrice)+'</td><td>'+money(p.stockCost)+'</td><td>'+money(p.grossProfit)+'</td><td>'+Number(p.marginPct||0).toFixed(1)+'%</td></tr>'; });
-    var lotRows=''; state.lots.slice().reverse().forEach(function(l){ lotRows += '<tr><td>'+(l.code||('#'+l.id))+'</td><td>'+supplierName(l.supplierId)+'</td><td>'+Number(l.qtyKg||0).toFixed(2)+' kg</td><td>'+money(l.totalCost||0)+'</td><td>'+l.status+'</td></tr>'; });
+    var lotRows=''; state.lots.slice().reverse().filter(function(l){ return stockRangeMatch(l.date); }).forEach(function(l){ lotRows += '<tr><td>'+(l.code||('#'+l.id))+'</td><td>'+supplierName(l.supplierId)+'</td><td>'+Number(l.qtyKg||0).toFixed(2)+' kg</td><td>'+money(l.totalCost||0)+'</td><td>'+l.status+'</td><td>'+(l.date||'')+'</td></tr>'; });
     var totalCost=0,totalPotential=0,totalProfit=0; metrics.forEach(function(m){ totalCost+=m.stockCost; totalPotential+=m.revenuePotential; totalProfit+=m.grossProfit; });
-    return '<div class="grid cards">'+
+    return '<div class="card"><h3>Filtro por data</h3><form id="form_stock_filter"><div class="row-3"><div><label>Data inicial</label><input type="date" name="startDate" value="'+(uiState.stockStartDate||'')+'" /></div><div><label>Data final</label><input type="date" name="endDate" value="'+(uiState.stockEndDate||'')+'" /></div><div style="display:flex;align-items:end"><button type="submit" class="btn secondary">Filtrar</button></div></div></form></div>'+
+      '<div class="grid cards">'+
       card('Estoque a custo',money(totalCost))+
       card('Receita potencial',money(totalPotential))+
       card('Lucro potencial',money(totalProfit))+
       card('Produtos em estoque',String(metrics.filter(function(m){return m.stock>0;}).length))+
       '</div>'+
-      '<div class="grid two"><div class="card"><h3>Estoque por produto</h3><table><thead><tr><th>Código</th><th>Produto</th><th>Tipo</th><th>Saldo</th><th>Custo médio</th><th>Venda</th><th>Valor estoque</th><th>Lucro potencial</th><th>Margem</th></tr></thead><tbody>'+rows+'</tbody></table></div><div class="card"><h3>Saldo por lote</h3><table><thead><tr><th>Lote</th><th>Fornecedor</th><th>Quantidade</th><th>Custo total</th><th>Status</th></tr></thead><tbody>'+lotRows+'</tbody></table></div></div>';
+      '<div class="grid two"><div class="card"><h3>Estoque por produto detalhado</h3><table><thead><tr><th>Código</th><th>Produto</th><th>Tipo</th><th>Saldo</th><th>Custo médio</th><th>Venda</th><th>Valor estoque</th><th>Lucro potencial</th><th>Margem</th></tr></thead><tbody>'+rows+'</tbody></table></div><div class="card"><h3>Saldo por lotes</h3><table><thead><tr><th>Lote</th><th>Fornecedor</th><th>Quantidade</th><th>Custo total</th><th>Status</th><th>Data</th></tr></thead><tbody>'+lotRows+'</tbody></table></div></div>';
   }
   function renderReports(){
-    var sales=salesProfitRows();
-    var salesRows=''; sales.slice(0,20).forEach(function(s){ salesRows += '<tr><td>'+(s.code||'')+'</td><td>'+s.date+'</td><td>'+s.customer+'</td><td>'+money(s.revenue)+'</td><td>'+money(s.realCost)+'</td><td>'+money(s.profit)+'</td><td>'+Number(s.margin||0).toFixed(1)+'%</td></tr>'; });
-    var debtorRows=''; topDebtors(15).forEach(function(r){ debtorRows += '<tr><td>'+(r.code||'')+'</td><td>'+(r.partyName||customerName(r.customerId))+'</td><td>'+(r.date||'')+'</td><td>'+money(r.openValue||0)+'</td></tr>'; });
-    var chequeStatus={}; state.cheques.forEach(function(c){ chequeStatus[c.status||'sem status']=(chequeStatus[c.status||'sem status']||0)+Number(c.value||0); });
-    var chequeRows=''; Object.keys(chequeStatus).forEach(function(k){ chequeRows += '<tr><td>'+k+'</td><td>'+money(chequeStatus[k])+'</td></tr>'; });
-    return '<div class="grid two"><div class="card"><h3>Vendas com custo real e lucro</h3><table><thead><tr><th>Código</th><th>Data</th><th>Cliente</th><th>Receita</th><th>Custo real</th><th>Lucro líquido</th><th>Margem</th></tr></thead><tbody>'+salesRows+'</tbody></table></div><div class="card"><h3>Clientes devedores</h3><table><thead><tr><th>Código</th><th>Cliente</th><th>Vencimento</th><th>Em aberto</th></tr></thead><tbody>'+debtorRows+'</tbody></table><h3 style="margin-top:18px">Cheques por status</h3><table><thead><tr><th>Status</th><th>Valor</th></tr></thead><tbody>'+chequeRows+'</tbody></table></div></div>';
+    var sales=salesProfitRowsFiltered(uiState.reportStartDate, uiState.reportEndDate);
+    var salesRows=''; sales.slice(0,50).forEach(function(s){ salesRows += '<tr><td>'+(s.code||'')+'</td><td>'+s.date+'</td><td>'+s.customer+'</td><td>'+money(s.revenue)+'</td><td>'+money(s.realCost)+'</td><td>'+money(s.profit)+'</td><td>'+Number(s.margin||0).toFixed(1)+'%</td></tr>'; });
+    var debtorRows=''; topDebtorsFiltered(50, uiState.reportStartDate, uiState.reportEndDate).forEach(function(r){ debtorRows += '<tr><td>'+(r.code||'')+'</td><td>'+(r.partyName||customerName(r.customerId))+'</td><td>'+(r.date||'')+'</td><td>'+money(r.openValue||0)+'</td></tr>'; });
+    var chequeStatus={}; state.cheques.filter(function(c){ return reportRangeMatch(c.dueDate||c.createdAt||today()); }).forEach(function(c){ chequeStatus[c.status||'sem status']=(chequeStatus[c.status||'sem status']||0)+Number(c.value||0); });
+    var chequeRows=''; Object.keys(chequeStatus).sort().forEach(function(k){ chequeRows += '<tr><td>'+k+'</td><td>'+money(chequeStatus[k])+'</td></tr>'; });
+    return '<div class="card"><h3>Filtros por data</h3><form id="form_reports_filter"><div class="row-3"><div><label>Data inicial</label><input type="date" name="startDate" value="'+(uiState.reportStartDate||'')+'" /></div><div><label>Data final</label><input type="date" name="endDate" value="'+(uiState.reportEndDate||'')+'" /></div><div style="display:flex;align-items:end"><button type="submit" class="btn secondary">Filtrar</button></div></div></form></div>'+
+      '<div class="grid two"><div class="card"><h3>Vendas com custo real e lucro</h3><table><thead><tr><th>Código</th><th>Data</th><th>Cliente</th><th>Receita</th><th>Custo real</th><th>Lucro líquido</th><th>Margem</th></tr></thead><tbody>'+salesRows+'</tbody></table></div><div class="card"><h3>Clientes devedores</h3><table><thead><tr><th>Código</th><th>Cliente</th><th>Vencimento</th><th>Em aberto</th></tr></thead><tbody>'+debtorRows+'</tbody></table><h3 style="margin-top:18px">Cheques por status</h3><table><thead><tr><th>Status</th><th>Valor</th></tr></thead><tbody>'+chequeRows+'</tbody></table></div></div>';
   }
   function renderReceivables(){
     var customerOpts=optionsFrom(state.customers,function(c){return (c.code?c.code+' - ':'')+c.name;});
@@ -644,7 +712,7 @@
     bindCadastro('suppliers',['name','type','phone','city']);
     bindCadastro('employees',['name','role','phone','salary']);
     bindCadastro('institutions',['name','type','phone','obs']);
-    bindCadastroEditButtons(); bindProducts(); bindSales(); bindCheques(); bindBorders(); bindFinance(); bindLots(); bindProduction(); bindPurchases(); bindTransfers(); bindReceivables(); bindPayables(); bindDeletes();
+    bindCadastroEditButtons(); bindProducts(); bindSales(); bindCheques(); bindBorders(); bindFinance(); bindLots(); bindProduction(); bindPurchases(); bindTransfers(); bindReceivables(); bindPayables(); bindStockFilters(); bindReportsFilters(); bindDeletes();
   }
   function bindCadastro(key,fields){
     var f=document.getElementById('form_'+key); if(!f) return; f.onsubmit=async function(e){ e.preventDefault();
@@ -844,18 +912,59 @@
 
   function bindFinance(){
     var f=document.getElementById('form_finance');
-    if(!f) return;
-    f.onsubmit=async function(e){
+    if(f){
+      f.elements.type.onchange=function(){ uiState.financeType=this.value||'entrada'; render(); setPage('finance'); };
+      f.onsubmit=async function(e){
+        e.preventDefault();
+        var value=Number(f.elements.value.value||0), accountId=Number(f.elements.accountId.value||0), partyId=Number(f.elements.partyId.value||0);
+        if(value<=0) return alert('Informe o valor.');
+        if(!partyId) return alert('Selecione '+(uiState.financeType==='saida'?'o fornecedor.':'o cliente.'));
+        var partyName = uiState.financeType==='saida' ? supplierName(partyId) : customerName(partyId);
+        try{
+          await apiPost('/financeiro',{ codigo: nextCode('FIN', state.finance), tipo:f.elements.type.value, categoria:f.elements.category.value||'manual', favorecido:partyName, contaId:accountId||null, valor:value, data:f.elements.date.value, origem:'manual', observacoes:'' });
+          f.reset();
+          uiState.financeType='entrada';
+          f.elements.date.value=today();
+          await syncRemoteCadastros();
+          render(); setPage('finance');
+        }catch(err){ alert(err.message||'Erro ao salvar lançamento.'); }
+      };
+    }
+    var ff=document.getElementById('form_finance_filter');
+    if(ff) ff.onsubmit=function(e){
       e.preventDefault();
-      var value=Number(f.elements.value.value||0), accountId=Number(f.elements.accountId.value||0);
-      if(value<=0) return alert('Informe o valor.');
-      try{
-        await apiPost('/financeiro',{ codigo: nextCode('FIN', state.finance), tipo:f.elements.type.value, categoria:f.elements.category.value||'manual', favorecido:f.elements.partyName.value||'', contaId:accountId||null, valor:value, data:f.elements.date.value, origem:'manual', observacoes:'' });
-        f.reset();
-        f.elements.date.value=today();
-        await syncRemoteCadastros();
-        render(); setPage('finance');
-      }catch(err){ alert(err.message||'Erro ao salvar lançamento.'); }
+      uiState.financeStartDate = ff.elements.startDate.value||'';
+      uiState.financeEndDate = ff.elements.endDate.value||'';
+      render(); setPage('finance');
+    };
+    var flow=document.getElementById('form_finance_flow_filter');
+    if(flow) flow.onsubmit=function(e){
+      e.preventDefault();
+      uiState.financeMonth = flow.elements.month.value||'';
+      uiState.financeYear = flow.elements.year.value||'';
+      render(); setPage('finance');
+    };
+  }
+
+  function bindStockFilters(){
+    var f=document.getElementById('form_stock_filter');
+    if(!f) return;
+    f.onsubmit=function(e){
+      e.preventDefault();
+      uiState.stockStartDate = f.elements.startDate.value||'';
+      uiState.stockEndDate = f.elements.endDate.value||'';
+      render(); setPage('stock');
+    };
+  }
+
+  function bindReportsFilters(){
+    var f=document.getElementById('form_reports_filter');
+    if(!f) return;
+    f.onsubmit=function(e){
+      e.preventDefault();
+      uiState.reportStartDate = f.elements.startDate.value||'';
+      uiState.reportEndDate = f.elements.endDate.value||'';
+      render(); setPage('reports');
     };
   }
 
